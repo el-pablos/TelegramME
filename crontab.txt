@@ -1,0 +1,21 @@
+# Crontab entries untuk Pterodactyl Telegram Bot
+# Tambahkan entries ini ke crontab dengan: crontab -e
+
+# Cleanup old logs setiap hari jam 2 pagi
+0 2 * * * /usr/bin/php /path/to/pterodactyl-telegram-bot/deploy.php cleanup >> /var/log/pterodactyl-bot-cron.log 2>&1
+
+# Health check setiap 5 menit
+*/5 * * * * /usr/bin/php /path/to/pterodactyl-telegram-bot/deploy.php health >> /var/log/pterodactyl-bot-health.log 2>&1
+
+# Backup database setiap hari jam 3 pagi
+0 3 * * * cp /path/to/pterodactyl-telegram-bot/logs/bot.db /path/to/backups/bot-$(date +\%Y\%m\%d).db
+
+# Restart bot service setiap minggu (opsional)
+0 4 * * 0 systemctl restart pterodactyl-bot
+
+# Monitor disk space dan kirim alert jika > 80%
+0 */6 * * * df -h | awk '$5 > 80 {print $0}' | mail -s "Disk Space Alert" admin@yourdomain.com
+
+# Contoh untuk webhook mode (jika tidak menggunakan supervisor/systemd):
+# Cek webhook status setiap 10 menit
+*/10 * * * * /usr/bin/curl -s "https://your-domain.com/?mode=health" | grep -q '"status":"ok"' || echo "Bot webhook down" | mail -s "Bot Alert" admin@yourdomain.com
