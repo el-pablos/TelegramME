@@ -114,9 +114,8 @@ get_input() {
 
 # Variables
 BOT_DIR="/var/www/pterodactyl-bot"
-NGINX_SITE="pterodactyl-bot"
 SERVICE_NAME="pterodactyl-bot"
-REQUIRED_PACKAGES="php8.1 php8.1-fpm php8.1-cli php8.1-curl php8.1-json php8.1-sqlite3 php8.1-mbstring php8.1-xml nginx curl unzip git supervisor"
+REQUIRED_PACKAGES="php8.1 php8.1-cli php8.1-curl php8.1-json php8.1-sqlite3 php8.1-mbstring php8.1-xml curl unzip git supervisor"
 
 # Start installation
 print_header "Starting Smart Installation Process"
@@ -125,9 +124,8 @@ check_os
 # Interactive configuration
 print_header "Configuration Setup"
 BOT_DIR=$(get_input "Bot installation directory" "$BOT_DIR")
-DOMAIN=$(get_input "Domain name (e.g., bot.yourdomain.com)" "")
-USE_SSL=$(get_input "Use SSL/HTTPS? (y/n)" "y")
-DEPLOYMENT_MODE=$(get_input "Deployment mode (webhook/polling)" "webhook")
+DEPLOYMENT_MODE="polling"
+print_info "Deployment mode: Polling (no web server needed)"
 
 # 1. Update system
 print_header "System Update"
@@ -252,82 +250,46 @@ if [ ! -f "$BOT_DIR/.env" ]; then
     sed -i "s|PTERODACTYL_APPLICATION_API_KEY=.*|PTERODACTYL_APPLICATION_API_KEY=$APP_KEY|g" $BOT_DIR/.env
     sed -i "s|PTERODACTYL_CLIENT_API_KEY=.*|PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY|g" $BOT_DIR/.env
 
-    if [ -n "$DOMAIN" ]; then
-        sed -i "s|WEBHOOK_URL=.*|WEBHOOK_URL=https://$DOMAIN|g" $BOT_DIR/.env
-    fi
+
 
     print_success "Environment configured"
 else
     print_skip ".env file already exists"
 fi
 
-# 8. Setup Nginx
+# 8. Skip web server (polling mode only)
 print_header "Web Server Configuration"
-if [ -f "/etc/nginx/sites-available/$NGINX_SITE" ]; then
-    print_skip "Nginx site configuration already exists"
-else
-    print_info "Setting up Nginx..."
-    sudo cp $BOT_DIR/nginx.conf /etc/nginx/sites-available/$NGINX_SITE
+print_skip "Web server not needed for polling mode"
 
-    # Update configuration
-    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/nginx/sites-available/$NGINX_SITE
-
-    if [ -n "$DOMAIN" ]; then
-        sudo sed -i "s|your-domain.com|$DOMAIN|g" /etc/nginx/sites-available/$NGINX_SITE
-    fi
-
-    print_success "Nginx configuration created"
-fi
-
-# Enable site
-if [ -L "/etc/nginx/sites-enabled/$NGINX_SITE" ]; then
-    print_skip "Nginx site already enabled"
-else
-    sudo ln -sf /etc/nginx/sites-available/$NGINX_SITE /etc/nginx/sites-enabled/
-    print_success "Nginx site enabled"
-fi
-
-# Test and reload nginx
-if sudo nginx -t; then
-    sudo systemctl reload nginx
-    print_success "Nginx reloaded successfully"
-else
-    print_error "Nginx configuration test failed"
-    exit 1
-fi
-
-# 9. Setup Service (Supervisor or Systemd)
+# 9. Setup Service (Supervisor and Systemd)
 print_header "Service Configuration"
-if [ "$DEPLOYMENT_MODE" = "polling" ]; then
-    # Setup Supervisor for polling mode
-    if [ -f "/etc/supervisor/conf.d/$SERVICE_NAME.conf" ]; then
-        print_skip "Supervisor configuration already exists"
-    else
-        print_info "Setting up Supervisor for polling mode..."
-        sudo cp $BOT_DIR/supervisor.conf /etc/supervisor/conf.d/$SERVICE_NAME.conf
-        sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/supervisor/conf.d/$SERVICE_NAME.conf
 
-        if sudo supervisorctl reread && sudo supervisorctl update; then
-            print_success "Supervisor configured"
-        else
-            print_warning "Supervisor configuration may need manual review"
-        fi
-    fi
-
-    # Setup systemd service (alternative)
-    if service_exists "$SERVICE_NAME"; then
-        print_skip "Systemd service already exists"
-    else
-        print_info "Setting up systemd service..."
-        sudo cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
-        sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
-
-        sudo systemctl daemon-reload
-        sudo systemctl enable $SERVICE_NAME
-        print_success "Systemd service configured"
-    fi
+# Setup Supervisor for polling mode
+if [ -f "/etc/supervisor/conf.d/$SERVICE_NAME.conf" ]; then
+    print_skip "Supervisor configuration already exists"
 else
-    print_skip "Webhook mode selected - no background service needed"
+    print_info "Setting up Supervisor for polling mode..."
+    sudo cp $BOT_DIR/supervisor.conf /etc/supervisor/conf.d/$SERVICE_NAME.conf
+    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/supervisor/conf.d/$SERVICE_NAME.conf
+
+    if sudo supervisorctl reread && sudo supervisorctl update; then
+        print_success "Supervisor configured"
+    else
+        print_warning "Supervisor configuration may need manual review"
+    fi
+fi
+
+# Setup systemd service (alternative)
+if service_exists "$SERVICE_NAME"; then
+    print_skip "Systemd service already exists"
+else
+    print_info "Setting up systemd service..."
+    sudo cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
+    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable $SERVICE_NAME
+    print_success "Systemd service configured"
 fi
 
 # 10. Setup cron jobs
@@ -363,29 +325,9 @@ for file in $LOG_FILES; do
 done
 print_success "Log directories and files ready"
 
-# 12. SSL Setup (if requested)
+# 12. SSL Setup (not needed for polling mode)
 print_header "SSL Configuration"
-if [ "$USE_SSL" = "y" ] && [ -n "$DOMAIN" ]; then
-    if command_exists certbot; then
-        print_skip "Certbot already installed"
-    else
-        print_info "Installing Certbot for SSL..."
-        sudo apt install -y certbot python3-certbot-nginx
-        print_success "Certbot installed"
-    fi
-
-    print_info "Setting up SSL certificate for $DOMAIN"
-    print_warning "Make sure your domain points to this server before proceeding"
-
-    SETUP_SSL=$(get_input "Setup SSL certificate now? (y/n)" "n")
-    if [ "$SETUP_SSL" = "y" ]; then
-        sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" || print_warning "SSL setup failed - you can run it manually later"
-    else
-        print_info "SSL setup skipped. Run manually: sudo certbot --nginx -d $DOMAIN"
-    fi
-else
-    print_skip "SSL setup skipped"
-fi
+print_skip "SSL not needed for polling mode"
 
 # 13. Run tests
 print_header "System Testing"
@@ -400,23 +342,13 @@ fi
 
 # 14. Final setup and start services
 print_header "Service Startup"
-if [ "$DEPLOYMENT_MODE" = "webhook" ]; then
-    print_info "Setting up webhook..."
-    if [ -n "$DOMAIN" ]; then
-        cd $BOT_DIR
-        php deploy.php webhook 2>/dev/null || print_warning "Webhook setup failed - configure manually"
+print_info "Starting polling service..."
+if service_exists "$SERVICE_NAME"; then
+    sudo systemctl start $SERVICE_NAME
+    if sudo systemctl is-active --quiet $SERVICE_NAME; then
+        print_success "Service started successfully"
     else
-        print_warning "No domain specified - webhook setup skipped"
-    fi
-else
-    print_info "Starting polling service..."
-    if service_exists "$SERVICE_NAME"; then
-        sudo systemctl start $SERVICE_NAME
-        if sudo systemctl is-active --quiet $SERVICE_NAME; then
-            print_success "Service started successfully"
-        else
-            print_warning "Service failed to start - check logs"
-        fi
+        print_warning "Service failed to start - check logs"
     fi
 fi
 
@@ -435,22 +367,15 @@ echo ""
 
 print_header "📋 Installation Summary"
 echo "Bot Directory: $BOT_DIR"
-echo "Domain: ${DOMAIN:-'Not configured'}"
-echo "SSL: ${USE_SSL:-'Not configured'}"
-echo "Deployment Mode: $DEPLOYMENT_MODE"
+echo "Deployment Mode: $DEPLOYMENT_MODE (Polling)"
 echo "Service: $SERVICE_NAME"
 echo ""
 
 print_header "🚀 Next Steps"
-if [ "$DEPLOYMENT_MODE" = "webhook" ]; then
-    echo "1. Test webhook: curl https://$DOMAIN/?mode=health"
-    echo "2. Send /start to your Telegram bot"
-    echo "3. Monitor logs: tail -f $BOT_DIR/logs/bot.log"
-else
-    echo "1. Check service: sudo systemctl status $SERVICE_NAME"
-    echo "2. Send /start to your Telegram bot"
-    echo "3. Monitor logs: sudo journalctl -u $SERVICE_NAME -f"
-fi
+echo "1. Check service: sudo systemctl status $SERVICE_NAME"
+echo "2. Send /start to your Telegram bot"
+echo "3. Monitor logs: sudo journalctl -u $SERVICE_NAME -f"
+echo "4. Manual start: cd $BOT_DIR && php index.php polling"
 echo ""
 
 print_header "🛠️ Useful Commands"
@@ -464,15 +389,11 @@ echo ""
 
 print_header "📁 Important Files"
 echo "• Configuration: $BOT_DIR/.env"
-echo "• Nginx config: /etc/nginx/sites-available/$NGINX_SITE"
 echo "• Service config: /etc/systemd/system/$SERVICE_NAME.service"
+echo "• Supervisor config: /etc/supervisor/conf.d/$SERVICE_NAME.conf"
 echo "• Bot logs: $BOT_DIR/logs/"
 echo "• System logs: /var/log/pterodactyl-bot-*.log"
 echo ""
-
-if [ "$DEPLOYMENT_MODE" = "webhook" ] && [ -n "$DOMAIN" ]; then
-    print_info "🌐 Your bot webhook URL: https://$DOMAIN"
-fi
 
 print_success "🤖 Happy botting! Your Pterodactyl Telegram Bot is ready!"
 echo ""

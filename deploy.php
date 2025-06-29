@@ -22,124 +22,32 @@ echo "===============================================\n\n";
 $action = $argv[1] ?? 'help';
 
 switch ($action) {
-    case 'webhook':
-        setWebhook();
-        break;
-        
-    case 'delete-webhook':
-        deleteWebhook();
-        break;
-        
-    case 'webhook-info':
-        getWebhookInfo();
-        break;
-        
     case 'test':
         runTests();
         break;
-        
+
     case 'cleanup':
         runCleanup();
         break;
-        
+
     case 'stats':
         showStats();
         break;
-        
+
     case 'health':
         healthCheck();
         break;
-        
+
     case 'polling':
         startPolling();
         break;
-        
+
     default:
         showHelp();
         break;
 }
 
-function setWebhook()
-{
-    echo "🔗 Setting up webhook...\n";
-    
-    $webhookUrl = $_ENV['WEBHOOK_URL'] ?? '';
-    $secretToken = $_ENV['WEBHOOK_SECRET_TOKEN'] ?? '';
-    
-    if (empty($webhookUrl)) {
-        echo "❌ WEBHOOK_URL not set in .env file\n";
-        exit(1);
-    }
-    
-    try {
-        $bot = new Bot();
-        $success = $bot->setWebhook($webhookUrl, $secretToken);
-        
-        if ($success) {
-            echo "✅ Webhook set successfully!\n";
-            echo "📍 URL: {$webhookUrl}\n";
-            echo "🔐 Secret Token: " . (!empty($secretToken) ? 'Set' : 'Not set') . "\n";
-        } else {
-            echo "❌ Failed to set webhook\n";
-            exit(1);
-        }
-        
-    } catch (Exception $e) {
-        echo "❌ Error: " . $e->getMessage() . "\n";
-        exit(1);
-    }
-}
 
-function deleteWebhook()
-{
-    echo "🗑️ Deleting webhook...\n";
-    
-    try {
-        $bot = new Bot();
-        $success = $bot->deleteWebhook();
-        
-        if ($success) {
-            echo "✅ Webhook deleted successfully!\n";
-        } else {
-            echo "❌ Failed to delete webhook\n";
-            exit(1);
-        }
-        
-    } catch (Exception $e) {
-        echo "❌ Error: " . $e->getMessage() . "\n";
-        exit(1);
-    }
-}
-
-function getWebhookInfo()
-{
-    echo "ℹ️ Getting webhook info...\n";
-    
-    try {
-        $bot = new Bot();
-        $info = $bot->getWebhookInfo();
-        
-        if (!empty($info)) {
-            echo "📊 Webhook Information:\n";
-            echo "   URL: " . ($info['url'] ?? 'Not set') . "\n";
-            echo "   Has Custom Certificate: " . ($info['has_custom_certificate'] ? 'Yes' : 'No') . "\n";
-            echo "   Pending Update Count: " . ($info['pending_update_count'] ?? 0) . "\n";
-            echo "   Max Connections: " . ($info['max_connections'] ?? 'Default') . "\n";
-            echo "   Allowed Updates: " . implode(', ', $info['allowed_updates'] ?? []) . "\n";
-            
-            if (!empty($info['last_error_date'])) {
-                echo "   Last Error Date: " . date('Y-m-d H:i:s', $info['last_error_date']) . "\n";
-                echo "   Last Error Message: " . ($info['last_error_message'] ?? 'None') . "\n";
-            }
-        } else {
-            echo "❌ No webhook info available\n";
-        }
-        
-    } catch (Exception $e) {
-        echo "❌ Error: " . $e->getMessage() . "\n";
-        exit(1);
-    }
-}
 
 function runTests()
 {
@@ -258,33 +166,31 @@ function showHelp()
 {
     echo "📖 Available Commands:\n";
     echo "=====================\n\n";
-    
-    echo "Webhook Management:\n";
-    echo "   webhook         - Set webhook URL\n";
-    echo "   delete-webhook  - Delete webhook\n";
-    echo "   webhook-info    - Get webhook information\n\n";
-    
+
     echo "Testing & Monitoring:\n";
     echo "   test           - Run all tests\n";
     echo "   health         - Health check\n";
     echo "   stats          - Show bot statistics\n\n";
-    
+
     echo "Maintenance:\n";
     echo "   cleanup        - Clean up old data\n";
-    echo "   polling        - Start long polling (development)\n\n";
-    
+    echo "   polling        - Start long polling mode\n\n";
+
     echo "Usage Examples:\n";
-    echo "   php deploy.php webhook\n";
     echo "   php deploy.php test\n";
     echo "   php deploy.php health\n";
     echo "   php deploy.php stats\n";
     echo "   php deploy.php cleanup\n";
     echo "   php deploy.php polling\n\n";
-    
+
     echo "Environment Setup:\n";
     echo "   1. Copy .env.example to .env\n";
     echo "   2. Configure your bot token and API keys\n";
-    echo "   3. Set WEBHOOK_URL for production\n";
-    echo "   4. Run 'php deploy.php test' to verify setup\n";
-    echo "   5. Run 'php deploy.php webhook' to set webhook\n\n";
+    echo "   3. Run 'php deploy.php test' to verify setup\n";
+    echo "   4. Run 'php deploy.php polling' to start bot\n\n";
+
+    echo "Service Management:\n";
+    echo "   sudo systemctl start pterodactyl-bot\n";
+    echo "   sudo systemctl status pterodactyl-bot\n";
+    echo "   sudo journalctl -u pterodactyl-bot -f\n\n";
 }

@@ -42,19 +42,14 @@ read -p "👤 Your Telegram ID: " OWNER_ID
 read -p "🌐 Pterodactyl Panel URL: " PANEL_URL
 read -p "🔑 Application API Key: " APP_KEY
 read -p "🔑 Client API Key: " CLIENT_KEY
-read -p "🌍 Domain (optional, for webhook): " DOMAIN
 
 # Set defaults
 BOT_DIR="/var/www/pterodactyl-bot"
-DEPLOYMENT_MODE="webhook"
-if [ -z "$DOMAIN" ]; then
-    DEPLOYMENT_MODE="polling"
-fi
+DEPLOYMENT_MODE="polling"
 
 print_info "Configuration:"
 echo "  Bot Directory: $BOT_DIR"
-echo "  Deployment: $DEPLOYMENT_MODE"
-echo "  Domain: ${DOMAIN:-'None (polling mode)'}"
+echo "  Deployment: $DEPLOYMENT_MODE (Polling Mode)"
 echo ""
 
 read -p "Continue with installation? (y/n): " CONFIRM
@@ -72,7 +67,7 @@ sudo apt update -qq
 
 # Install essential packages
 print_info "Installing packages..."
-sudo apt install -y php8.1 php8.1-fpm php8.1-cli php8.1-curl php8.1-json php8.1-sqlite3 php8.1-mbstring php8.1-xml nginx curl unzip git supervisor -qq
+sudo apt install -y php8.1 php8.1-cli php8.1-curl php8.1-json php8.1-sqlite3 php8.1-mbstring php8.1-xml curl unzip git supervisor -qq
 
 # Install Composer if not exists
 if ! command -v composer >/dev/null 2>&1; then
@@ -112,32 +107,14 @@ sed -i "s|PTERODACTYL_PANEL_URL=.*|PTERODACTYL_PANEL_URL=$PANEL_URL|g" .env
 sed -i "s|PTERODACTYL_APPLICATION_API_KEY=.*|PTERODACTYL_APPLICATION_API_KEY=$APP_KEY|g" .env
 sed -i "s|PTERODACTYL_CLIENT_API_KEY=.*|PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY|g" .env
 
-if [ -n "$DOMAIN" ]; then
-    sed -i "s|WEBHOOK_URL=.*|WEBHOOK_URL=https://$DOMAIN|g" .env
-fi
-
-# Setup Nginx
-print_info "Configuring web server..."
-sudo cp nginx.conf /etc/nginx/sites-available/pterodactyl-bot
-sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/nginx/sites-available/pterodactyl-bot
-
-if [ -n "$DOMAIN" ]; then
-    sudo sed -i "s|your-domain.com|$DOMAIN|g" /etc/nginx/sites-available/pterodactyl-bot
-fi
-
-sudo ln -sf /etc/nginx/sites-available/pterodactyl-bot /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-
 # Setup service for polling mode
-if [ "$DEPLOYMENT_MODE" = "polling" ]; then
-    print_info "Setting up background service..."
-    sudo cp systemd.service /etc/systemd/system/pterodactyl-bot.service
-    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/pterodactyl-bot.service
-    
-    sudo systemctl daemon-reload
-    sudo systemctl enable pterodactyl-bot
-    sudo systemctl start pterodactyl-bot
-fi
+print_info "Setting up background service..."
+sudo cp systemd.service /etc/systemd/system/pterodactyl-bot.service
+sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/pterodactyl-bot.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable pterodactyl-bot
+sudo systemctl start pterodactyl-bot
 
 # Setup basic cron jobs
 print_info "Setting up maintenance tasks..."
@@ -151,12 +128,6 @@ else
     print_warning "Installation test failed - check configuration"
 fi
 
-# Setup webhook if domain provided
-if [ "$DEPLOYMENT_MODE" = "webhook" ] && [ -n "$DOMAIN" ]; then
-    print_info "Setting up webhook..."
-    php deploy.php webhook 2>/dev/null || print_warning "Webhook setup failed"
-fi
-
 # Final status
 echo ""
 print_success "🎉 Quick setup completed!"
@@ -164,23 +135,15 @@ echo ""
 
 print_header "📋 Setup Summary"
 echo "Bot Directory: $BOT_DIR"
-echo "Mode: $DEPLOYMENT_MODE"
-if [ -n "$DOMAIN" ]; then
-    echo "URL: https://$DOMAIN"
-fi
+echo "Mode: $DEPLOYMENT_MODE (Polling)"
 echo ""
 
 print_header "🚀 Next Steps"
 echo "1. Send /start to your Telegram bot"
-echo "2. Test with: cd $BOT_DIR && php deploy.php health"
-
-if [ "$DEPLOYMENT_MODE" = "polling" ]; then
-    echo "3. Check service: sudo systemctl status pterodactyl-bot"
-    echo "4. View logs: sudo journalctl -u pterodactyl-bot -f"
-else
-    echo "3. Test webhook: curl https://$DOMAIN/?mode=health"
-    echo "4. View logs: tail -f $BOT_DIR/logs/bot.log"
-fi
+echo "2. Test with: cd $BOT_DIR && php index.php health"
+echo "3. Check service: sudo systemctl status pterodactyl-bot"
+echo "4. View logs: sudo journalctl -u pterodactyl-bot -f"
+echo "5. Manual start: cd $BOT_DIR && php index.php polling"
 
 echo ""
 print_success "🤖 Your bot is ready! Happy botting!"

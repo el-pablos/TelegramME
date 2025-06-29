@@ -80,7 +80,6 @@ chmod +x quick-setup.sh
 - 🌐 Pterodactyl Panel URL
 - 🔑 Application API Key
 - 🔑 Client API Key
-- 🌍 Domain (optional)
 
 ### 🔧 **Advanced Installation**
 
@@ -126,8 +125,6 @@ LOG_FILE=logs/bot.log
 LOG_MAX_FILES=7
 
 # Bot Configuration
-WEBHOOK_URL=https://your-domain.com/webhook
-WEBHOOK_SECRET_TOKEN=your_secret_token
 DEBUG_MODE=false
 ```
 
@@ -145,23 +142,23 @@ DEBUG_MODE=false
 | `/optimize` | ⚡ Panel optimization | Cache, database, logs cleanup |
 | `/manage` | 🛠️ Individual control | Single server management |
 
-### 🔗 **API Endpoints**
+### 🔗 **CLI Commands**
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/?mode=health` | GET | 🏥 System health check |
-| `/?mode=stats` | GET | 📊 Usage statistics |
-| `/?mode=webhook` | POST | 🔗 Telegram webhook |
-| `/?mode=polling` | GET | 🔄 Long polling mode |
+| Command | Description |
+|---------|-------------|
+| `php index.php polling` | 🔄 Start bot in polling mode |
+| `php index.php health` | 🏥 System health check |
+| `php index.php stats` | 📊 Usage statistics |
+| `php index.php cleanup` | 🧹 Cleanup old data |
 
 ### ⚙️ **Smart Features**
 
 - **🔍 Auto Package Detection** - Skip installed packages
 - **💾 Auto Backup** - Backup before updates
-- **🔐 Auto SSL** - Let's Encrypt integration
-- **🛡️ Security Headers** - Nginx security config
-- **📊 Real-time Monitoring** - Health checks & alerts
+- ** Real-time Monitoring** - Health checks & alerts
 - **🔄 Auto Recovery** - Rollback on failures
+- **🛠️ Service Management** - Systemd & Supervisor integration
+- **📝 Comprehensive Logging** - SQLite database & file logs
 
 ---
 
@@ -268,12 +265,7 @@ sqlite3 logs/bot.db "SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT 1
 ```bash
 # Firewall setup
 sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
 sudo ufw enable
-
-# SSL certificate (Let's Encrypt)
-sudo certbot --nginx -d your-domain.com
 
 # Service monitoring
 sudo systemctl enable pterodactyl-bot

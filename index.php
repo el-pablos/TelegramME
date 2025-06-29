@@ -1,10 +1,10 @@
 <?php
 
 /**
- * Pterodactyl Telegram Bot - Entry Point
- * 
+ * Pterodactyl Telegram Bot - Entry Point (Polling Mode Only)
+ *
  * Bot untuk kontrol massal Pterodactyl Panel via Telegram
- * 
+ *
  * @author Pablos (@ImTamaa)
  * @version 1.0.0
  */
@@ -26,57 +26,34 @@ use PteroBot\Bot;
 // Set timezone
 date_default_timezone_set('Asia/Jakarta');
 
-// Headers untuk webhook
-header('Content-Type: application/json');
-
 try {
     // Initialize bot
     $bot = new Bot();
-    
-    // Determine mode berdasarkan request method dan parameters
-    $mode = $_GET['mode'] ?? 'webhook';
-    
+
+    // Determine mode berdasarkan command line arguments atau default
+    $mode = $argv[1] ?? 'polling';
+
     switch ($mode) {
-        case 'webhook':
-            // Handle webhook dari Telegram
-            handleWebhook($bot);
-            break;
-            
         case 'polling':
-            // Long polling untuk development
+            // Long polling mode (default)
             handlePolling($bot);
             break;
-            
-        case 'set_webhook':
-            // Set webhook URL
-            handleSetWebhook($bot);
-            break;
-            
-        case 'delete_webhook':
-            // Delete webhook
-            handleDeleteWebhook($bot);
-            break;
-            
-        case 'webhook_info':
-            // Get webhook info
-            handleWebhookInfo($bot);
-            break;
-            
+
         case 'health':
             // Health check
             handleHealthCheck($bot);
             break;
-            
+
         case 'stats':
             // Bot statistics
             handleStats($bot);
             break;
-            
+
         case 'cleanup':
             // Cleanup old data
             handleCleanup($bot);
             break;
-            
+
         default:
             // Default: show bot info
             handleBotInfo($bot);
@@ -84,121 +61,27 @@ try {
     }
 
 } catch (Exception $e) {
-    // Log error dan kirim response error
+    // Log error
     error_log('Bot Error: ' . $e->getMessage());
-    
-    http_response_code(500);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Internal server error',
-        'timestamp' => date('Y-m-d H:i:s')
-    ]);
+    echo "❌ Bot Error: " . $e->getMessage() . "\n";
+    exit(1);
 }
 
 /**
- * Handle webhook request dari Telegram
- */
-function handleWebhook(Bot $bot): void
-{
-    // Verify request method
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        http_response_code(405);
-        echo json_encode(['error' => 'Method not allowed']);
-        return;
-    }
-    
-    // Verify content type
-    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (strpos($contentType, 'application/json') === false) {
-        http_response_code(400);
-        echo json_encode(['error' => 'Invalid content type']);
-        return;
-    }
-    
-    // Verify secret token jika diset
-    $secretToken = $_ENV['WEBHOOK_SECRET_TOKEN'] ?? '';
-    if (!empty($secretToken)) {
-        $receivedToken = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
-        if ($receivedToken !== $secretToken) {
-            http_response_code(401);
-            echo json_encode(['error' => 'Unauthorized']);
-            return;
-        }
-    }
-    
-    // Process webhook
-    $bot->handleWebhook();
-    
-    // Send OK response
-    echo json_encode(['status' => 'ok']);
-}
-
-/**
- * Handle long polling untuk development
+ * Handle long polling mode
  */
 function handlePolling(Bot $bot): void
 {
-    // Hanya allow dari localhost untuk security
-    if (!in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1', 'localhost'])) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Forbidden']);
-        return;
-    }
-    
-    echo json_encode(['status' => 'starting_polling']);
-    
+    echo "🚀 Starting Pterodactyl Telegram Bot...\n";
+    echo "📱 Mode: Long Polling\n";
+    echo "⏰ Started at: " . date('Y-m-d H:i:s') . "\n";
+    echo "🔄 Press Ctrl+C to stop\n\n";
+
     // Start long polling
     $bot->handleLongPolling();
 }
 
-/**
- * Set webhook URL
- */
-function handleSetWebhook(Bot $bot): void
-{
-    $url = $_GET['url'] ?? $_ENV['WEBHOOK_URL'] ?? '';
-    $secretToken = $_GET['secret'] ?? $_ENV['WEBHOOK_SECRET_TOKEN'] ?? '';
-    
-    if (empty($url)) {
-        http_response_code(400);
-        echo json_encode(['error' => 'Webhook URL required']);
-        return;
-    }
-    
-    $success = $bot->setWebhook($url, $secretToken);
-    
-    echo json_encode([
-        'status' => $success ? 'success' : 'error',
-        'webhook_url' => $url,
-        'has_secret_token' => !empty($secretToken)
-    ]);
-}
 
-/**
- * Delete webhook
- */
-function handleDeleteWebhook(Bot $bot): void
-{
-    $success = $bot->deleteWebhook();
-    
-    echo json_encode([
-        'status' => $success ? 'success' : 'error',
-        'message' => $success ? 'Webhook deleted' : 'Failed to delete webhook'
-    ]);
-}
-
-/**
- * Get webhook info
- */
-function handleWebhookInfo(Bot $bot): void
-{
-    $info = $bot->getWebhookInfo();
-    
-    echo json_encode([
-        'status' => 'success',
-        'webhook_info' => $info
-    ]);
-}
 
 /**
  * Health check
@@ -206,9 +89,26 @@ function handleWebhookInfo(Bot $bot): void
 function handleHealthCheck(Bot $bot): void
 {
     $health = $bot->healthCheck();
-    
-    http_response_code($health['status'] === 'ok' ? 200 : 500);
-    echo json_encode($health);
+
+    echo "🏥 Health Check Results:\n";
+    echo "Status: " . strtoupper($health['status']) . "\n";
+    echo "Timestamp: " . $health['timestamp'] . "\n\n";
+
+    echo "Component Checks:\n";
+    foreach ($health['checks'] as $component => $status) {
+        $icon = $status === 'ok' ? '✅' : '❌';
+        echo "  {$icon} " . ucfirst(str_replace('_', ' ', $component)) . ": {$status}\n";
+    }
+
+    if ($health['status'] !== 'ok') {
+        echo "\n❌ Health check failed!\n";
+        if (isset($health['error'])) {
+            echo "Error: " . $health['error'] . "\n";
+        }
+        exit(1);
+    } else {
+        echo "\n✅ All systems operational!\n";
+    }
 }
 
 /**
@@ -216,23 +116,38 @@ function handleHealthCheck(Bot $bot): void
  */
 function handleStats(Bot $bot): void
 {
-    // Hanya allow owner atau localhost
-    $allowedIPs = ['127.0.0.1', '::1', 'localhost'];
-    $ownerTelegramId = $_ENV['OWNER_TELEGRAM_ID'] ?? '';
-    $requestUserId = $_GET['user_id'] ?? '';
-    
-    if (!in_array($_SERVER['REMOTE_ADDR'] ?? '', $allowedIPs) && $requestUserId !== $ownerTelegramId) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Forbidden']);
-        return;
-    }
-    
     $stats = $bot->getStats();
-    
-    echo json_encode([
-        'status' => 'success',
-        'stats' => $stats
-    ]);
+
+    echo "📊 Bot Statistics:\n";
+    echo "================\n\n";
+
+    echo "🤖 Bot Info:\n";
+    echo "  Username: " . $stats['bot_info']['username'] . "\n";
+    echo "  Owner ID: " . $stats['bot_info']['owner_id'] . "\n";
+    echo "  Panel URL: " . $stats['bot_info']['panel_url'] . "\n\n";
+
+    echo "🔒 Security Stats:\n";
+    echo "  Active Operations: " . $stats['security']['active_operations'] . "\n";
+    echo "  Blocked Users: " . $stats['security']['blocked_users'] . "\n";
+    echo "  Violations Today: " . $stats['security']['violations_today'] . "\n\n";
+
+    echo "📈 Activity Stats (Last 7 days):\n";
+    if (!empty($stats['activity'])) {
+        foreach ($stats['activity'] as $activity) {
+            echo "  {$activity['action']}: {$activity['count']} total, {$activity['success_count']} success\n";
+        }
+    } else {
+        echo "  No activity recorded\n";
+    }
+
+    echo "\n❌ Recent Errors:\n";
+    if (!empty($stats['errors'])) {
+        foreach ($stats['errors'] as $error) {
+            echo "  [{$error['timestamp']}] {$error['error_type']}: {$error['error_message']}\n";
+        }
+    } else {
+        echo "  No recent errors\n";
+    }
 }
 
 /**
@@ -240,19 +155,11 @@ function handleStats(Bot $bot): void
  */
 function handleCleanup(Bot $bot): void
 {
-    // Hanya allow dari localhost atau dengan auth
-    if (!in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1', 'localhost'])) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Forbidden']);
-        return;
-    }
-    
+    echo "🧹 Starting cleanup process...\n";
+
     $bot->cleanup();
-    
-    echo json_encode([
-        'status' => 'success',
-        'message' => 'Cleanup completed'
-    ]);
+
+    echo "✅ Cleanup completed successfully!\n";
 }
 
 /**
@@ -260,25 +167,30 @@ function handleCleanup(Bot $bot): void
  */
 function handleBotInfo(Bot $bot): void
 {
-    $info = [
-        'name' => 'Pterodactyl Telegram Control Bot',
-        'version' => '1.0.0',
-        'author' => $_ENV['AUTHOR_NAME'] ?? 'Pablos',
-        'telegram' => $_ENV['AUTHOR_TELEGRAM'] ?? '@ImTamaa',
-        'panel_url' => $_ENV['PTERODACTYL_PANEL_URL'] ?? '',
-        'status' => 'running',
-        'timestamp' => date('Y-m-d H:i:s'),
-        'endpoints' => [
-            'webhook' => '/?mode=webhook',
-            'polling' => '/?mode=polling',
-            'set_webhook' => '/?mode=set_webhook&url=YOUR_WEBHOOK_URL',
-            'delete_webhook' => '/?mode=delete_webhook',
-            'webhook_info' => '/?mode=webhook_info',
-            'health' => '/?mode=health',
-            'stats' => '/?mode=stats',
-            'cleanup' => '/?mode=cleanup'
-        ]
-    ];
-    
-    echo json_encode($info, JSON_PRETTY_PRINT);
+    echo "🤖 Pterodactyl Telegram Control Bot\n";
+    echo "===================================\n\n";
+
+    echo "📋 Bot Information:\n";
+    echo "  Name: Pterodactyl Telegram Control Bot\n";
+    echo "  Version: 1.0.0\n";
+    echo "  Author: " . ($_ENV['AUTHOR_NAME'] ?? 'Pablos') . "\n";
+    echo "  Telegram: " . ($_ENV['AUTHOR_TELEGRAM'] ?? '@ImTamaa') . "\n";
+    echo "  Panel URL: " . ($_ENV['PTERODACTYL_PANEL_URL'] ?? 'Not configured') . "\n";
+    echo "  Status: Running\n";
+    echo "  Timestamp: " . date('Y-m-d H:i:s') . "\n\n";
+
+    echo "🔧 Available Commands:\n";
+    echo "  php index.php polling  - Start bot in polling mode\n";
+    echo "  php index.php health   - Health check\n";
+    echo "  php index.php stats    - Show statistics\n";
+    echo "  php index.php cleanup  - Cleanup old data\n\n";
+
+    echo "📱 Telegram Commands:\n";
+    echo "  /start      - Main menu\n";
+    echo "  /restartall - Restart all servers\n";
+    echo "  /reinstallall - Reinstall all servers\n";
+    echo "  /optimize   - Optimize panel\n";
+    echo "  /manage     - Manage individual servers\n\n";
+
+    echo "🚀 To start the bot: php index.php polling\n";
 }

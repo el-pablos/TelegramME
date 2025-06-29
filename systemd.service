@@ -11,7 +11,7 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/path/to/pterodactyl-telegram-bot
-ExecStart=/usr/bin/php /path/to/pterodactyl-telegram-bot/index.php?mode=polling
+ExecStart=/usr/bin/php /path/to/pterodactyl-telegram-bot/index.php polling
 Restart=always
 RestartSec=5
 StartLimitInterval=60s

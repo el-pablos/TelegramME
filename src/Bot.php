@@ -144,138 +144,45 @@ class Bot
         }
     }
 
-    /**
-     * Handle webhook request
-     */
-    public function handleWebhook(): void
-    {
-        try {
-            $this->logger->info('Processing webhook request');
-            
-            // Process the update
-            $serverResponse = $this->telegram->handle();
-            
-            if ($serverResponse->isOk()) {
-                $this->logger->info('Webhook processed successfully');
-            } else {
-                $this->logger->error('Webhook processing failed: ' . $serverResponse->getDescription());
-            }
 
-        } catch (TelegramException $e) {
-            $this->logger->error('Webhook handling error: ' . $e->getMessage());
-            
-            // Notify owner about critical errors
-            $this->notifyOwner('🚨 Bot Error: ' . $e->getMessage());
-        } catch (\Exception $e) {
-            $this->logger->critical('Critical error in webhook handling: ' . $e->getMessage());
-            
-            // Notify owner about critical errors
-            $this->notifyOwner('🚨 Critical Bot Error: ' . $e->getMessage());
-        }
-    }
 
     /**
-     * Handle long polling (untuk development/testing)
+     * Handle long polling mode
      */
     public function handleLongPolling(): void
     {
         try {
-            $this->logger->info('Starting long polling...');
-            
+            $this->logger->info('Starting long polling mode...');
+
             while (true) {
                 $serverResponse = $this->telegram->handleGetUpdates();
-                
+
                 if ($serverResponse->isOk()) {
                     $updates = $serverResponse->getResult();
-                    
+
                     if (!empty($updates)) {
                         $this->logger->info('Processed ' . count($updates) . ' updates');
+                        echo "📨 Processed " . count($updates) . " updates at " . date('H:i:s') . "\n";
                     }
                 } else {
                     $this->logger->error('Long polling error: ' . $serverResponse->getDescription());
+                    echo "❌ Polling error: " . $serverResponse->getDescription() . "\n";
                     sleep(5); // Wait before retry
                 }
-                
+
                 sleep(1); // Prevent excessive API calls
             }
 
         } catch (TelegramException $e) {
             $this->logger->error('Long polling error: ' . $e->getMessage());
+            echo "❌ Telegram error: " . $e->getMessage() . "\n";
         } catch (\Exception $e) {
             $this->logger->critical('Critical error in long polling: ' . $e->getMessage());
+            echo "💥 Critical error: " . $e->getMessage() . "\n";
         }
     }
 
-    /**
-     * Set webhook URL
-     */
-    public function setWebhook(string $url, string $secretToken = ''): bool
-    {
-        try {
-            $params = ['url' => $url];
-            
-            if (!empty($secretToken)) {
-                $params['secret_token'] = $secretToken;
-            }
 
-            $result = Request::setWebhook($params);
-            
-            if ($result->isOk()) {
-                $this->logger->info("Webhook set successfully: {$url}");
-                return true;
-            } else {
-                $this->logger->error('Failed to set webhook: ' . $result->getDescription());
-                return false;
-            }
-
-        } catch (TelegramException $e) {
-            $this->logger->error('Webhook setup error: ' . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Delete webhook
-     */
-    public function deleteWebhook(): bool
-    {
-        try {
-            $result = Request::deleteWebhook();
-            
-            if ($result->isOk()) {
-                $this->logger->info('Webhook deleted successfully');
-                return true;
-            } else {
-                $this->logger->error('Failed to delete webhook: ' . $result->getDescription());
-                return false;
-            }
-
-        } catch (TelegramException $e) {
-            $this->logger->error('Webhook deletion error: ' . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Get webhook info
-     */
-    public function getWebhookInfo(): array
-    {
-        try {
-            $result = Request::getWebhookInfo();
-            
-            if ($result->isOk()) {
-                return $result->getResult()->getRawData();
-            } else {
-                $this->logger->error('Failed to get webhook info: ' . $result->getDescription());
-                return [];
-            }
-
-        } catch (TelegramException $e) {
-            $this->logger->error('Get webhook info error: ' . $e->getMessage());
-            return [];
-        }
-    }
 
     /**
      * Send notification to owner
@@ -352,10 +259,19 @@ class Bot
 
             // Check Pterodactyl API
             try {
-                $servers = $this->security->isUserAllowed((int)$this->ownerTelegramId);
+                // Test API connection by checking if user is allowed (this will test API)
+                $this->security->isUserAllowed((int)$this->ownerTelegramId);
                 $health['checks']['pterodactyl_api'] = 'ok';
             } catch (\Exception $e) {
                 $health['checks']['pterodactyl_api'] = 'error';
+            }
+
+            // Check if any component failed
+            foreach ($health['checks'] as $check => $status) {
+                if ($status !== 'ok') {
+                    $health['status'] = 'error';
+                    break;
+                }
             }
 
         } catch (\Exception $e) {
