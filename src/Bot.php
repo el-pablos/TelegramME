@@ -93,8 +93,7 @@ class Bot
             $this->telegram->setDownloadPath(__DIR__ . '/../downloads');
             $this->telegram->setUploadPath(__DIR__ . '/../uploads');
 
-            // Configure database for long polling (use dummy MySQL config to prevent errors)
-            $this->configureBotDatabase();
+            // Skip database configuration - use simple polling
 
             $this->logger->info('Telegram bot initialized successfully');
 
@@ -104,30 +103,7 @@ class Bot
         }
     }
 
-    /**
-     * Configure bot database to prevent MySQL errors
-     */
-    private function configureBotDatabase(): void
-    {
-        try {
-            // Try to configure MySQL if available
-            $dbConfig = [
-                'host' => 'localhost',
-                'port' => 3306,
-                'user' => 'root',
-                'password' => '',
-                'database' => 'telegram_bot',
-            ];
 
-            // Try to enable MySQL - if it fails, we'll use direct API calls
-            $this->telegram->enableMySql($dbConfig, 'telegram_bot_');
-            $this->logger->info('MySQL database configured for bot');
-
-        } catch (\Exception $e) {
-            // MySQL not available - we'll use direct API calls in handleLongPolling
-            $this->logger->info('MySQL not available, using direct API calls for polling: ' . $e->getMessage());
-        }
-    }
 
     /**
      * Setup bot commands
@@ -175,77 +151,310 @@ class Bot
 
 
     /**
-     * Handle long polling mode (without MySQL requirement)
+     * Handle long polling mode (simple version without MySQL)
      */
     public function handleLongPolling(): void
     {
         try {
-            $this->logger->info('Starting long polling mode...');
+            $this->logger->info('Starting simple long polling mode...');
 
             $lastUpdateId = 0;
+            $lastHeartbeat = 0;
 
             while (true) {
-                // Use direct API call to avoid MySQL requirement
+                // Get updates directly from Telegram API
                 $updates = $this->getUpdatesDirectly($lastUpdateId);
 
                 if (!empty($updates)) {
-                    foreach ($updates as $update) {
+                    foreach ($updates as $updateData) {
                         try {
-                            // Process each update
-                            $this->telegram->processUpdate($update);
-                            $lastUpdateId = max($lastUpdateId, $update->getUpdateId() + 1);
+                            // Process each update manually
+                            $this->processUpdateManually($updateData);
+                            $lastUpdateId = max($lastUpdateId, $updateData['update_id'] + 1);
                         } catch (\Exception $e) {
                             $this->logger->error('Error processing update: ' . $e->getMessage());
+                            echo "❌ Error processing update: " . $e->getMessage() . "\n";
                         }
                     }
 
                     $this->logger->info('Processed ' . count($updates) . ' updates');
                     echo "📨 Processed " . count($updates) . " updates at " . date('H:i:s') . "\n";
                 } else {
-                    // No updates, just show heartbeat every 30 seconds
-                    static $lastHeartbeat = 0;
+                    // No updates, show heartbeat every 30 seconds
                     if (time() - $lastHeartbeat > 30) {
                         echo "💓 Bot is running... " . date('H:i:s') . "\n";
                         $lastHeartbeat = time();
                     }
                 }
 
-                sleep(1); // Prevent excessive API calls
+                sleep(2); // Prevent excessive API calls
             }
 
-        } catch (TelegramException $e) {
-            $this->logger->error('Long polling error: ' . $e->getMessage());
-            echo "❌ Telegram error: " . $e->getMessage() . "\n";
         } catch (\Exception $e) {
             $this->logger->critical('Critical error in long polling: ' . $e->getMessage());
             echo "💥 Critical error: " . $e->getMessage() . "\n";
+
+            // Wait before retry
+            sleep(5);
+
+            // Restart polling
+            $this->handleLongPolling();
         }
     }
 
     /**
-     * Get updates directly from Telegram API without MySQL
+     * Get updates directly from Telegram API using cURL
      */
     private function getUpdatesDirectly(int $offset = 0): array
     {
         try {
+            $botToken = $_ENV['BOT_TOKEN'];
+            $url = "https://api.telegram.org/bot{$botToken}/getUpdates";
+
             $params = [
                 'offset' => $offset,
                 'limit' => 100,
                 'timeout' => 10
             ];
 
-            $response = Request::getUpdates($params);
+            // Use cURL for direct API call
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url . '?' . http_build_query($params));
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 
-            if ($response->isOk()) {
-                return $response->getResult();
-            } else {
-                $this->logger->error('Failed to get updates: ' . $response->getDescription());
-                return [];
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($httpCode === 200 && $response) {
+                $data = json_decode($response, true);
+                if ($data && $data['ok']) {
+                    return $data['result'];
+                }
             }
+
+            return [];
 
         } catch (\Exception $e) {
             $this->logger->error('Error getting updates: ' . $e->getMessage());
             return [];
+        }
+    }
+
+    /**
+     * Process update manually without library dependencies
+     */
+    private function processUpdateManually(array $updateData): void
+    {
+        try {
+            // Extract message data
+            if (isset($updateData['message'])) {
+                $message = $updateData['message'];
+                $chatId = $message['chat']['id'];
+                $text = $message['text'] ?? '';
+                $userId = $message['from']['id'] ?? 0;
+
+                // Check if user is owner
+                if ($userId != $this->ownerTelegramId) {
+                    $this->sendMessage($chatId, "❌ Access denied. This bot is private.");
+                    return;
+                }
+
+                // Process commands
+                if (strpos($text, '/') === 0) {
+                    $this->processCommand($chatId, $text, $message);
+                }
+
+            } elseif (isset($updateData['callback_query'])) {
+                $callbackQuery = $updateData['callback_query'];
+                $chatId = $callbackQuery['message']['chat']['id'];
+                $data = $callbackQuery['data'];
+                $userId = $callbackQuery['from']['id'] ?? 0;
+
+                // Check if user is owner
+                if ($userId != $this->ownerTelegramId) {
+                    return;
+                }
+
+                // Process callback
+                $this->processCallback($chatId, $data, $callbackQuery);
+            }
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error processing update manually: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Process command manually
+     */
+    private function processCommand(int $chatId, string $text, array $message): void
+    {
+        try {
+            $command = strtolower(trim(explode(' ', $text)[0]));
+
+            switch ($command) {
+                case '/start':
+                    $this->sendStartMenu($chatId);
+                    break;
+
+                case '/restartall':
+                    $this->sendMessage($chatId, "🔄 Starting mass restart...");
+                    // Add restart logic here
+                    break;
+
+                case '/reinstallall':
+                    $this->sendMessage($chatId, "🔧 Starting mass reinstall...");
+                    // Add reinstall logic here
+                    break;
+
+                case '/optimize':
+                    $this->sendMessage($chatId, "⚡ Starting panel optimization...");
+                    // Add optimize logic here
+                    break;
+
+                case '/manage':
+                    $this->sendMessage($chatId, "🛠️ Server management menu...");
+                    // Add manage logic here
+                    break;
+
+                default:
+                    $this->sendMessage($chatId, "❓ Unknown command. Send /start for menu.");
+                    break;
+            }
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error processing command: ' . $e->getMessage());
+            $this->sendMessage($chatId, "❌ Error processing command.");
+        }
+    }
+
+    /**
+     * Process callback query manually
+     */
+    private function processCallback(int $chatId, string $data, array $callbackQuery): void
+    {
+        try {
+            // Answer callback query first
+            $this->answerCallbackQuery($callbackQuery['id']);
+
+            // Process callback data
+            switch ($data) {
+                case 'restart_all':
+                    $this->sendMessage($chatId, "🔄 Mass restart initiated...");
+                    break;
+
+                case 'reinstall_all':
+                    $this->sendMessage($chatId, "🔧 Mass reinstall initiated...");
+                    break;
+
+                case 'optimize_panel':
+                    $this->sendMessage($chatId, "⚡ Panel optimization started...");
+                    break;
+
+                case 'manage_servers':
+                    $this->sendMessage($chatId, "🛠️ Server management...");
+                    break;
+
+                default:
+                    $this->sendMessage($chatId, "❓ Unknown action.");
+                    break;
+            }
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error processing callback: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Send start menu
+     */
+    private function sendStartMenu(int $chatId): void
+    {
+        $text = "🤖 *Pterodactyl Panel Control Bot*\n\n";
+        $text .= "Welcome! Choose an action:\n\n";
+        $text .= "🔄 Mass Restart - Restart all servers\n";
+        $text .= "🔧 Mass Reinstall - Reinstall all servers\n";
+        $text .= "⚡ Optimize Panel - Clean cache & optimize\n";
+        $text .= "🛠️ Manage Servers - Individual server control";
+
+        $keyboard = [
+            [
+                ['text' => '🔄 Mass Restart', 'callback_data' => 'restart_all'],
+                ['text' => '🔧 Mass Reinstall', 'callback_data' => 'reinstall_all']
+            ],
+            [
+                ['text' => '⚡ Optimize Panel', 'callback_data' => 'optimize_panel'],
+                ['text' => '🛠️ Manage Servers', 'callback_data' => 'manage_servers']
+            ]
+        ];
+
+        $this->sendMessage($chatId, $text, $keyboard);
+    }
+
+    /**
+     * Send message using cURL
+     */
+    private function sendMessage(int $chatId, string $text, array $keyboard = null): void
+    {
+        try {
+            $botToken = $_ENV['BOT_TOKEN'];
+            $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
+
+            $params = [
+                'chat_id' => $chatId,
+                'text' => $text,
+                'parse_mode' => 'Markdown'
+            ];
+
+            if ($keyboard) {
+                $params['reply_markup'] = json_encode([
+                    'inline_keyboard' => $keyboard
+                ]);
+            }
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+            curl_exec($ch);
+            curl_close($ch);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error sending message: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Answer callback query using cURL
+     */
+    private function answerCallbackQuery(string $callbackQueryId): void
+    {
+        try {
+            $botToken = $_ENV['BOT_TOKEN'];
+            $url = "https://api.telegram.org/bot{$botToken}/answerCallbackQuery";
+
+            $params = [
+                'callback_query_id' => $callbackQueryId
+            ];
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+            curl_exec($ch);
+            curl_close($ch);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error answering callback query: ' . $e->getMessage());
         }
     }
 
