@@ -146,7 +146,13 @@ SERVICE_NAME="pterodactyl-bot"
 
 # Detect PHP version and set packages
 detect_php_packages
-REQUIRED_PACKAGES="$PHP_PACKAGE_VERSION ${PHP_PACKAGE_VERSION}-cli ${PHP_PACKAGE_VERSION}-curl ${PHP_PACKAGE_VERSION}-json ${PHP_PACKAGE_VERSION}-sqlite3 ${PHP_PACKAGE_VERSION}-mbstring ${PHP_PACKAGE_VERSION}-xml curl unzip git supervisor"
+
+# Fix PHP 8.3+ package names (json is built-in since PHP 8.0)
+if [[ $PHP_PACKAGE_VERSION == "php8.3" ]] || [[ $PHP_PACKAGE_VERSION == "php8.4" ]]; then
+    REQUIRED_PACKAGES="$PHP_PACKAGE_VERSION ${PHP_PACKAGE_VERSION}-cli ${PHP_PACKAGE_VERSION}-curl ${PHP_PACKAGE_VERSION}-sqlite3 ${PHP_PACKAGE_VERSION}-mbstring ${PHP_PACKAGE_VERSION}-xml curl unzip git supervisor"
+else
+    REQUIRED_PACKAGES="$PHP_PACKAGE_VERSION ${PHP_PACKAGE_VERSION}-cli ${PHP_PACKAGE_VERSION}-curl ${PHP_PACKAGE_VERSION}-json ${PHP_PACKAGE_VERSION}-sqlite3 ${PHP_PACKAGE_VERSION}-mbstring ${PHP_PACKAGE_VERSION}-xml curl unzip git supervisor"
+fi
 
 # Start installation
 print_header "Starting Smart Installation Process"

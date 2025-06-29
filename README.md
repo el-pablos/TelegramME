@@ -73,6 +73,12 @@ unzip main.zip && cd ptero-panel-control-main/
 # Root Setup (3 minutes) - Perfect for VPS
 chmod +x root-setup.sh
 ./root-setup.sh
+
+# 🎯 Smart Features:
+# ✅ Auto-detects existing .env configuration
+# ✅ Auto-detects PHP version (8.1, 8.2, 8.3)
+# ✅ Skips configured settings
+# ✅ No permission issues
 ```
 
 #### 👤 **Regular User Setup**
@@ -173,6 +179,8 @@ DEBUG_MODE=false
 - **📝 Comprehensive Logging** - SQLite database & file logs
 - **🔑 Root User Support** - Perfect for VPS deployment
 - **🐘 PHP 8.3 Support** - Latest PHP version compatibility
+- **🧠 Smart .env Detection** - Auto-detect existing configuration
+- **📦 Smart Package Detection** - Auto-detect PHP version & packages
 
 ---
 
@@ -330,6 +338,56 @@ sudo systemctl start pterodactyl-bot
 ## � Troubleshooting
 
 ### 🔧 **Common Issues**
+
+<details>
+<summary><strong>🐘 PHP 8.3 Package Error (FIXED!)</strong></summary>
+
+```bash
+# ❌ Old error: Package 'php8.3-json' has no installation candidate
+# ✅ FIXED: JSON is built-in since PHP 8.0
+
+# Script now auto-detects PHP version and skips json package for PHP 8.3+
+# No manual intervention needed!
+
+# Test PHP detection:
+./test-php-packages.sh
+```
+</details>
+
+<details>
+<summary><strong>🧠 .env Auto-Detection</strong></summary>
+
+```bash
+# ✅ Script now auto-detects existing .env configuration
+# If .env exists with all required fields, script will ask:
+# "Use existing configuration? (y/n)"
+
+# To force new configuration:
+rm .env
+./root-setup.sh
+
+# Test .env detection:
+./test-env-detection.sh
+```
+</details>
+
+<details>
+<summary><strong>🔑 Root vs Regular User</strong></summary>
+
+```bash
+# For root user (recommended for VPS):
+./root-setup.sh
+# Files in: /root/pterodactyl-bot/
+# User: root
+# No permission issues!
+
+# For regular user:
+./quick-setup.sh
+# Files in: /var/www/pterodactyl-bot/
+# User: www-data
+# Requires sudo for some operations
+```
+</details>
 
 <details>
 <summary><strong>🤖 Bot tidak merespon</strong></summary>

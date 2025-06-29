@@ -32,15 +32,50 @@ fi
 print_info "Running as root - perfect for VPS setup!"
 echo ""
 
-# Essential configuration
-read -p "🤖 Bot Token: " BOT_TOKEN
-read -p "👤 Your Telegram ID: " OWNER_ID
-read -p "🌐 Pterodactyl Panel URL: " PANEL_URL
-read -p "🔑 Application API Key: " APP_KEY
-read -p "🔑 Client API Key: " CLIENT_KEY
-
 # Set defaults
 BOT_DIR="/root/pterodactyl-bot"
+
+# Check if .env already exists and is configured
+check_existing_env() {
+    if [ -f ".env" ]; then
+        BOT_TOKEN=$(grep "^BOT_TOKEN=" .env 2>/dev/null | cut -d'=' -f2)
+        OWNER_ID=$(grep "^OWNER_TELEGRAM_ID=" .env 2>/dev/null | cut -d'=' -f2)
+        PANEL_URL=$(grep "^PTERODACTYL_PANEL_URL=" .env 2>/dev/null | cut -d'=' -f2)
+        APP_KEY=$(grep "^PTERODACTYL_APPLICATION_API_KEY=" .env 2>/dev/null | cut -d'=' -f2)
+        CLIENT_KEY=$(grep "^PTERODACTYL_CLIENT_API_KEY=" .env 2>/dev/null | cut -d'=' -f2)
+
+        if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_ID" ] && [ -n "$PANEL_URL" ] && [ -n "$APP_KEY" ] && [ -n "$CLIENT_KEY" ]; then
+            print_success "Found existing .env configuration!"
+            echo "  Bot Token: ${BOT_TOKEN:0:10}..."
+            echo "  Owner ID: $OWNER_ID"
+            echo "  Panel URL: $PANEL_URL"
+            echo "  App Key: ${APP_KEY:0:15}..."
+            echo "  Client Key: ${CLIENT_KEY:0:15}..."
+            echo ""
+            read -p "Use existing configuration? (y/n): " USE_EXISTING
+            if [ "$USE_EXISTING" = "y" ]; then
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+# Check for existing configuration
+if check_existing_env; then
+    print_info "Using existing .env configuration"
+    SKIP_ENV_CONFIG=true
+else
+    print_info "Setting up new configuration..."
+    SKIP_ENV_CONFIG=false
+
+    # Essential configuration
+    read -p "🤖 Bot Token: " BOT_TOKEN
+    read -p "👤 Your Telegram ID: " OWNER_ID
+    read -p "🌐 Pterodactyl Panel URL: " PANEL_URL
+    read -p "🔑 Application API Key: " APP_KEY
+    read -p "🔑 Client API Key: " CLIENT_KEY
+fi
 
 print_info "Configuration:"
 echo "  Bot Directory: $BOT_DIR"
@@ -81,7 +116,14 @@ fi
 
 # Install essential packages
 print_info "Installing packages..."
-PACKAGES="$PHP_PACKAGE ${PHP_PACKAGE}-cli ${PHP_PACKAGE}-curl ${PHP_PACKAGE}-json ${PHP_PACKAGE}-sqlite3 ${PHP_PACKAGE}-mbstring ${PHP_PACKAGE}-xml curl unzip git supervisor"
+# Fix PHP 8.3 package names (json is built-in since PHP 8.0)
+if [[ $PHP_PACKAGE == "php8.3" ]]; then
+    PACKAGES="$PHP_PACKAGE ${PHP_PACKAGE}-cli ${PHP_PACKAGE}-curl ${PHP_PACKAGE}-sqlite3 ${PHP_PACKAGE}-mbstring ${PHP_PACKAGE}-xml curl unzip git supervisor"
+else
+    PACKAGES="$PHP_PACKAGE ${PHP_PACKAGE}-cli ${PHP_PACKAGE}-curl ${PHP_PACKAGE}-json ${PHP_PACKAGE}-sqlite3 ${PHP_PACKAGE}-mbstring ${PHP_PACKAGE}-xml curl unzip git supervisor"
+fi
+
+print_info "Installing: $PACKAGES"
 apt install -y $PACKAGES -qq
 
 # Install Composer if not exists
@@ -112,15 +154,24 @@ chmod -R 755 $BOT_DIR
 chmod -R 777 $BOT_DIR/logs
 
 # Configure environment
-print_info "Configuring environment..."
-cp .env.example .env
+if [ "$SKIP_ENV_CONFIG" = "false" ]; then
+    print_info "Configuring environment..."
+    cp .env.example .env
 
-# Update .env with user input
-sed -i "s|BOT_TOKEN=.*|BOT_TOKEN=$BOT_TOKEN|g" .env
-sed -i "s|OWNER_TELEGRAM_ID=.*|OWNER_TELEGRAM_ID=$OWNER_ID|g" .env
-sed -i "s|PTERODACTYL_PANEL_URL=.*|PTERODACTYL_PANEL_URL=$PANEL_URL|g" .env
-sed -i "s|PTERODACTYL_APPLICATION_API_KEY=.*|PTERODACTYL_APPLICATION_API_KEY=$APP_KEY|g" .env
-sed -i "s|PTERODACTYL_CLIENT_API_KEY=.*|PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY|g" .env
+    # Update .env with user input
+    sed -i "s|BOT_TOKEN=.*|BOT_TOKEN=$BOT_TOKEN|g" .env
+    sed -i "s|OWNER_TELEGRAM_ID=.*|OWNER_TELEGRAM_ID=$OWNER_ID|g" .env
+    sed -i "s|PTERODACTYL_PANEL_URL=.*|PTERODACTYL_PANEL_URL=$PANEL_URL|g" .env
+    sed -i "s|PTERODACTYL_APPLICATION_API_KEY=.*|PTERODACTYL_APPLICATION_API_KEY=$APP_KEY|g" .env
+    sed -i "s|PTERODACTYL_CLIENT_API_KEY=.*|PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY|g" .env
+    print_success "Environment configured"
+else
+    print_info "Using existing .env configuration"
+    # Copy existing .env to bot directory if we're not already there
+    if [ ! -f "$BOT_DIR/.env" ] && [ -f ".env" ]; then
+        cp .env $BOT_DIR/.env 2>/dev/null || true
+    fi
+fi
 
 # Setup service for polling mode
 print_info "Setting up background service..."
