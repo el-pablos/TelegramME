@@ -1,42 +1,35 @@
 #!/bin/bash
 
-# Quick Setup Script untuk Pterodactyl Telegram Bot
+# Root Setup Script untuk Pterodactyl Telegram Bot
 # Author: Pablos (@ImTamaa)
-# Version: 1.0 - One-command deployment
+# Optimized for root user on VPS
 
 set -e
+
+echo "🚀 Pterodactyl Telegram Bot - Root Setup"
+echo "========================================"
+echo ""
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
 NC='\033[0m'
 
 print_success() { echo -e "${GREEN}✅ $1${NC}"; }
 print_error() { echo -e "${RED}❌ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️ $1${NC}"; }
 print_info() { echo -e "${BLUE}ℹ️ $1${NC}"; }
-print_header() { echo -e "${PURPLE}🔧 $1${NC}"; }
-
-echo "🚀 Pterodactyl Telegram Bot - Quick Setup"
-echo "========================================"
-echo ""
 
 # Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   print_info "Running as root - will setup with root permissions"
-   RUNNING_AS_ROOT=true
-else
-   print_info "Running as regular user with sudo"
-   RUNNING_AS_ROOT=false
+if [[ $EUID -ne 0 ]]; then
+   print_error "This script must be run as root"
+   print_info "Run: sudo su - then ./root-setup.sh"
+   exit 1
 fi
 
-# Quick configuration
-print_header "Quick Configuration"
-echo "This script will set up the bot with minimal prompts."
-echo "For advanced configuration, use ./install.sh instead."
+print_info "Running as root - perfect for VPS setup!"
 echo ""
 
 # Essential configuration
@@ -47,12 +40,12 @@ read -p "🔑 Application API Key: " APP_KEY
 read -p "🔑 Client API Key: " CLIENT_KEY
 
 # Set defaults
-BOT_DIR="/var/www/pterodactyl-bot"
-DEPLOYMENT_MODE="polling"
+BOT_DIR="/root/pterodactyl-bot"
 
 print_info "Configuration:"
 echo "  Bot Directory: $BOT_DIR"
-echo "  Deployment: $DEPLOYMENT_MODE (Polling Mode)"
+echo "  User: root"
+echo "  Mode: Polling"
 echo ""
 
 read -p "Continue with installation? (y/n): " CONFIRM
@@ -62,25 +55,21 @@ if [ "$CONFIRM" != "y" ]; then
 fi
 
 # Start installation
-print_header "Starting Quick Installation"
+print_info "Starting Root Installation..."
 
 # Update system
 print_info "Updating system..."
-if [[ $RUNNING_AS_ROOT == true ]]; then
-    apt update -qq
-else
-    sudo apt update -qq
-fi
+apt update -qq
 
 # Detect PHP version
 if command -v php >/dev/null 2>&1; then
     PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
     PHP_MAJOR=$(php -r "echo PHP_MAJOR_VERSION;")
     PHP_MINOR=$(php -r "echo PHP_MINOR_VERSION;")
-
+    
     if [[ $PHP_MAJOR -eq 8 && $PHP_MINOR -ge 1 ]]; then
         PHP_PACKAGE="php${PHP_MAJOR}.${PHP_MINOR}"
-        print_info "Using existing PHP $PHP_VERSION"
+        print_success "Using existing PHP $PHP_VERSION"
     else
         PHP_PACKAGE="php8.3"
         print_info "Will install PHP 8.3"
@@ -93,35 +82,20 @@ fi
 # Install essential packages
 print_info "Installing packages..."
 PACKAGES="$PHP_PACKAGE ${PHP_PACKAGE}-cli ${PHP_PACKAGE}-curl ${PHP_PACKAGE}-json ${PHP_PACKAGE}-sqlite3 ${PHP_PACKAGE}-mbstring ${PHP_PACKAGE}-xml curl unzip git supervisor"
-
-if [[ $RUNNING_AS_ROOT == true ]]; then
-    apt install -y $PACKAGES -qq
-else
-    sudo apt install -y $PACKAGES -qq
-fi
+apt install -y $PACKAGES -qq
 
 # Install Composer if not exists
 if ! command -v composer >/dev/null 2>&1; then
     print_info "Installing Composer..."
     curl -sS https://getcomposer.org/installer | php
-    if [[ $RUNNING_AS_ROOT == true ]]; then
-        mv composer.phar /usr/local/bin/composer
-        chmod +x /usr/local/bin/composer
-    else
-        sudo mv composer.phar /usr/local/bin/composer
-        sudo chmod +x /usr/local/bin/composer
-    fi
+    mv composer.phar /usr/local/bin/composer
+    chmod +x /usr/local/bin/composer
 fi
 
 # Create bot directory
 print_info "Setting up bot directory..."
-if [[ $RUNNING_AS_ROOT == true ]]; then
-    mkdir -p $BOT_DIR
-    chown root:root $BOT_DIR
-else
-    sudo mkdir -p $BOT_DIR
-    sudo chown $USER:www-data $BOT_DIR
-fi
+mkdir -p $BOT_DIR
+chown root:root $BOT_DIR
 
 # Copy files
 print_info "Deploying bot files..."
@@ -133,15 +107,9 @@ print_info "Installing dependencies..."
 composer install --no-dev --optimize-autoloader -q
 
 # Setup permissions
-if [[ $RUNNING_AS_ROOT == true ]]; then
-    chown -R root:root $BOT_DIR
-    chmod -R 755 $BOT_DIR
-    chmod -R 777 $BOT_DIR/logs
-else
-    sudo chown -R $USER:www-data $BOT_DIR
-    sudo chmod -R 755 $BOT_DIR
-    sudo chmod -R 777 $BOT_DIR/logs
-fi
+chown -R root:root $BOT_DIR
+chmod -R 755 $BOT_DIR
+chmod -R 777 $BOT_DIR/logs
 
 # Configure environment
 print_info "Configuring environment..."
@@ -156,23 +124,14 @@ sed -i "s|PTERODACTYL_CLIENT_API_KEY=.*|PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY|g
 
 # Setup service for polling mode
 print_info "Setting up background service..."
-if [[ $RUNNING_AS_ROOT == true ]]; then
-    cp systemd.service /etc/systemd/system/pterodactyl-bot.service
-    sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/pterodactyl-bot.service
-    sed -i "s|User=www-data|User=root|g" /etc/systemd/system/pterodactyl-bot.service
-    sed -i "s|Group=www-data|Group=root|g" /etc/systemd/system/pterodactyl-bot.service
+cp systemd.service /etc/systemd/system/pterodactyl-bot.service
+sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/pterodactyl-bot.service
+sed -i "s|User=www-data|User=root|g" /etc/systemd/system/pterodactyl-bot.service
+sed -i "s|Group=www-data|Group=root|g" /etc/systemd/system/pterodactyl-bot.service
 
-    systemctl daemon-reload
-    systemctl enable pterodactyl-bot
-    systemctl start pterodactyl-bot
-else
-    sudo cp systemd.service /etc/systemd/system/pterodactyl-bot.service
-    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/pterodactyl-bot.service
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable pterodactyl-bot
-    sudo systemctl start pterodactyl-bot
-fi
+systemctl daemon-reload
+systemctl enable pterodactyl-bot
+systemctl start pterodactyl-bot
 
 # Setup basic cron jobs
 print_info "Setting up maintenance tasks..."
@@ -188,21 +147,30 @@ fi
 
 # Final status
 echo ""
-print_success "🎉 Quick setup completed!"
+print_success "🎉 Root setup completed!"
 echo ""
 
-print_header "📋 Setup Summary"
-echo "Bot Directory: $BOT_DIR"
-echo "Mode: $DEPLOYMENT_MODE (Polling)"
+print_info "📋 Setup Summary:"
+echo "  Bot Directory: $BOT_DIR"
+echo "  User: root"
+echo "  Mode: Polling"
 echo ""
 
-print_header "🚀 Next Steps"
+print_info "🚀 Next Steps:"
 echo "1. Send /start to your Telegram bot"
 echo "2. Test with: cd $BOT_DIR && php index.php health"
-echo "3. Check service: sudo systemctl status pterodactyl-bot"
-echo "4. View logs: sudo journalctl -u pterodactyl-bot -f"
+echo "3. Check service: systemctl status pterodactyl-bot"
+echo "4. View logs: journalctl -u pterodactyl-bot -f"
 echo "5. Manual start: cd $BOT_DIR && php index.php polling"
 
 echo ""
 print_success "🤖 Your bot is ready! Happy botting!"
-print_info "For advanced features, run: cd $BOT_DIR && ./install.sh"
+print_info "All files are in: $BOT_DIR"
+print_info "Service runs as root - perfect for VPS!"
+
+echo ""
+print_info "🔧 Useful Commands:"
+echo "  systemctl status pterodactyl-bot    # Check status"
+echo "  systemctl restart pterodactyl-bot   # Restart bot"
+echo "  journalctl -u pterodactyl-bot -f    # View logs"
+echo "  cd $BOT_DIR && php index.php health # Health check"

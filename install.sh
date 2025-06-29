@@ -46,8 +46,15 @@ print_header() {
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root. Please run as regular user with sudo privileges."
-   exit 1
+   print_info "Running as root - will setup with proper permissions"
+   RUNNING_AS_ROOT=true
+   INSTALL_USER="root"
+   INSTALL_GROUP="root"
+else
+   print_info "Running as regular user with sudo"
+   RUNNING_AS_ROOT=false
+   INSTALL_USER="$USER"
+   INSTALL_GROUP="www-data"
 fi
 
 # Check OS and version
@@ -90,10 +97,31 @@ command_exists() {
 check_php_version() {
     if command_exists php; then
         PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
-        if [[ $(echo "$PHP_VERSION >= 8.0" | bc -l) -eq 1 ]]; then
+        print_info "Detected PHP version: $PHP_VERSION"
+        if [[ $(echo "$PHP_VERSION >= 8.1" | bc -l) -eq 1 ]]; then
             return 0
         fi
     fi
+    return 1
+}
+
+# Detect PHP version and set package names
+detect_php_packages() {
+    if command_exists php; then
+        PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+        PHP_MAJOR=$(php -r "echo PHP_MAJOR_VERSION;")
+        PHP_MINOR=$(php -r "echo PHP_MINOR_VERSION;")
+
+        if [[ $PHP_MAJOR -eq 8 && $PHP_MINOR -ge 1 ]]; then
+            PHP_PACKAGE_VERSION="php${PHP_MAJOR}.${PHP_MINOR}"
+            print_success "Using existing PHP $PHP_VERSION"
+            return 0
+        fi
+    fi
+
+    # Default to PHP 8.3 if not found or version too old
+    PHP_PACKAGE_VERSION="php8.3"
+    print_info "Will install PHP 8.3"
     return 1
 }
 
@@ -115,7 +143,10 @@ get_input() {
 # Variables
 BOT_DIR="/var/www/pterodactyl-bot"
 SERVICE_NAME="pterodactyl-bot"
-REQUIRED_PACKAGES="php8.1 php8.1-cli php8.1-curl php8.1-json php8.1-sqlite3 php8.1-mbstring php8.1-xml curl unzip git supervisor"
+
+# Detect PHP version and set packages
+detect_php_packages
+REQUIRED_PACKAGES="$PHP_PACKAGE_VERSION ${PHP_PACKAGE_VERSION}-cli ${PHP_PACKAGE_VERSION}-curl ${PHP_PACKAGE_VERSION}-json ${PHP_PACKAGE_VERSION}-sqlite3 ${PHP_PACKAGE_VERSION}-mbstring ${PHP_PACKAGE_VERSION}-xml curl unzip git supervisor"
 
 # Start installation
 print_header "Starting Smart Installation Process"
@@ -138,12 +169,20 @@ if [ -f /var/lib/apt/periodic/update-success-stamp ]; then
         print_skip "System updated recently (less than 1 hour ago)"
     else
         print_info "Updating system packages..."
-        sudo apt update && sudo apt upgrade -y
+        if [[ $RUNNING_AS_ROOT == true ]]; then
+            apt update && apt upgrade -y
+        else
+            sudo apt update && sudo apt upgrade -y
+        fi
         print_success "System updated"
     fi
 else
     print_info "Updating system packages..."
-    sudo apt update && sudo apt upgrade -y
+    if [[ $RUNNING_AS_ROOT == true ]]; then
+        apt update && apt upgrade -y
+    else
+        sudo apt update && sudo apt upgrade -y
+    fi
     print_success "System updated"
 fi
 
@@ -165,14 +204,23 @@ if command_exists composer; then
 else
     print_info "Installing Composer..."
     curl -sS https://getcomposer.org/installer | php
-    sudo mv composer.phar /usr/local/bin/composer
-    sudo chmod +x /usr/local/bin/composer
+    if [[ $RUNNING_AS_ROOT == true ]]; then
+        mv composer.phar /usr/local/bin/composer
+        chmod +x /usr/local/bin/composer
+    else
+        sudo mv composer.phar /usr/local/bin/composer
+        sudo chmod +x /usr/local/bin/composer
+    fi
     print_success "Composer installed"
 fi
 
 if [ -n "$PACKAGES_TO_INSTALL" ]; then
     print_info "Installing packages:$PACKAGES_TO_INSTALL"
-    sudo apt install -y $PACKAGES_TO_INSTALL
+    if [[ $RUNNING_AS_ROOT == true ]]; then
+        apt install -y $PACKAGES_TO_INSTALL
+    else
+        sudo apt install -y $PACKAGES_TO_INSTALL
+    fi
     print_success "New packages installed"
 else
     print_skip "All required packages already installed"
@@ -194,9 +242,15 @@ if [ -d "$BOT_DIR" ]; then
 fi
 
 print_info "Creating bot directory..."
-sudo mkdir -p $BOT_DIR
-sudo chown $USER:www-data $BOT_DIR
-sudo chmod 755 $BOT_DIR
+if [[ $RUNNING_AS_ROOT == true ]]; then
+    mkdir -p $BOT_DIR
+    chown $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
+    chmod 755 $BOT_DIR
+else
+    sudo mkdir -p $BOT_DIR
+    sudo chown $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
+    sudo chmod 755 $BOT_DIR
+fi
 print_success "Bot directory created: $BOT_DIR"
 
 # 4. Copy files
@@ -224,9 +278,15 @@ print_success "Dependencies ready"
 # 6. Setup permissions
 print_header "Permissions Setup"
 print_info "Setting up permissions..."
-sudo chown -R $USER:www-data $BOT_DIR
-sudo chmod -R 755 $BOT_DIR
-sudo chmod -R 777 $BOT_DIR/logs
+if [[ $RUNNING_AS_ROOT == true ]]; then
+    chown -R $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
+    chmod -R 755 $BOT_DIR
+    chmod -R 777 $BOT_DIR/logs
+else
+    sudo chown -R $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
+    sudo chmod -R 755 $BOT_DIR
+    sudo chmod -R 777 $BOT_DIR/logs
+fi
 print_success "Permissions set"
 
 # 7. Setup environment
@@ -272,10 +332,18 @@ else
     sudo cp $BOT_DIR/supervisor.conf /etc/supervisor/conf.d/$SERVICE_NAME.conf
     sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/supervisor/conf.d/$SERVICE_NAME.conf
 
-    if sudo supervisorctl reread && sudo supervisorctl update; then
-        print_success "Supervisor configured"
+    if [[ $RUNNING_AS_ROOT == true ]]; then
+        if supervisorctl reread && supervisorctl update; then
+            print_success "Supervisor configured"
+        else
+            print_warning "Supervisor configuration may need manual review"
+        fi
     else
-        print_warning "Supervisor configuration may need manual review"
+        if sudo supervisorctl reread && sudo supervisorctl update; then
+            print_success "Supervisor configured"
+        else
+            print_warning "Supervisor configuration may need manual review"
+        fi
     fi
 fi
 
@@ -284,11 +352,23 @@ if service_exists "$SERVICE_NAME"; then
     print_skip "Systemd service already exists"
 else
     print_info "Setting up systemd service..."
-    sudo cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
-    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
+    if [[ $RUNNING_AS_ROOT == true ]]; then
+        cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
+        sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
+        sed -i "s|User=www-data|User=$INSTALL_USER|g" /etc/systemd/system/$SERVICE_NAME.service
+        sed -i "s|Group=www-data|Group=$INSTALL_GROUP|g" /etc/systemd/system/$SERVICE_NAME.service
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable $SERVICE_NAME
+        systemctl daemon-reload
+        systemctl enable $SERVICE_NAME
+    else
+        sudo cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
+        sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
+        sudo sed -i "s|User=www-data|User=$INSTALL_USER|g" /etc/systemd/system/$SERVICE_NAME.service
+        sudo sed -i "s|Group=www-data|Group=$INSTALL_GROUP|g" /etc/systemd/system/$SERVICE_NAME.service
+
+        sudo systemctl daemon-reload
+        sudo systemctl enable $SERVICE_NAME
+    fi
     print_success "Systemd service configured"
 fi
 

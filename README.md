@@ -64,6 +64,18 @@
 
 ### ⚡ **One-Command Setup** (Ubuntu VPS)
 
+#### 🔑 **Root User Setup** (Recommended for VPS)
+```bash
+# Download & Extract
+wget https://github.com/el-pablos/ptero-panel-control/archive/main.zip
+unzip main.zip && cd ptero-panel-control-main/
+
+# Root Setup (3 minutes) - Perfect for VPS
+chmod +x root-setup.sh
+./root-setup.sh
+```
+
+#### 👤 **Regular User Setup**
 ```bash
 # Download & Extract
 wget https://github.com/el-pablos/ptero-panel-control/archive/main.zip
@@ -96,8 +108,8 @@ chmod +x install.sh
 ### 📋 **Requirements**
 
 - **OS**: Ubuntu 20.04+ (auto-detected)
-- **PHP**: 8.1+ with extensions (auto-installed)
-- **Web Server**: Nginx (auto-configured)
+- **PHP**: 8.1+ with extensions (auto-installed, supports 8.3)
+- **User**: Root or regular user with sudo (both supported)
 - **Database**: SQLite (auto-setup)
 - **Dependencies**: Composer, Git, Curl (auto-installed)
 
@@ -159,6 +171,50 @@ DEBUG_MODE=false
 - **🔄 Auto Recovery** - Rollback on failures
 - **🛠️ Service Management** - Systemd & Supervisor integration
 - **📝 Comprehensive Logging** - SQLite database & file logs
+- **🔑 Root User Support** - Perfect for VPS deployment
+- **🐘 PHP 8.3 Support** - Latest PHP version compatibility
+
+---
+
+---
+
+## 🔑 Root User Deployment
+
+### 🚀 **Perfect for VPS**
+
+Running as root eliminates permission issues and simplifies VPS deployment:
+
+```bash
+# As root user
+sudo su -
+cd /root
+git clone https://github.com/el-pablos/ptero-panel-control.git
+cd ptero-panel-control/
+./root-setup.sh
+```
+
+### ✅ **Root Benefits**
+
+- **🔧 No Permission Issues** - Full system access
+- **📁 Simple File Management** - All files in `/root/pterodactyl-bot/`
+- **🛠️ Easy Service Management** - Direct systemctl access
+- **🔒 Secure VPS Setup** - Perfect for dedicated servers
+- **⚡ Faster Installation** - No sudo overhead
+
+### 🔧 **Root Commands**
+
+```bash
+# Service management
+systemctl status pterodactyl-bot
+systemctl restart pterodactyl-bot
+journalctl -u pterodactyl-bot -f
+
+# Bot management
+cd /root/pterodactyl-bot
+php index.php health
+php index.php stats
+php deploy.php cleanup
+```
 
 ---
 
@@ -169,9 +225,6 @@ DEBUG_MODE=false
 ```bash
 # Health check
 php deploy.php health
-
-# Set webhook
-php deploy.php webhook
 
 # View statistics
 php deploy.php stats
