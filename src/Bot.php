@@ -93,11 +93,39 @@ class Bot
             $this->telegram->setDownloadPath(__DIR__ . '/../downloads');
             $this->telegram->setUploadPath(__DIR__ . '/../uploads');
 
+            // Configure database for long polling (use dummy MySQL config to prevent errors)
+            $this->configureBotDatabase();
+
             $this->logger->info('Telegram bot initialized successfully');
 
         } catch (TelegramException $e) {
             $this->logger->critical('Failed to initialize Telegram bot: ' . $e->getMessage());
             throw new \Exception('Failed to initialize Telegram bot: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Configure bot database to prevent MySQL errors
+     */
+    private function configureBotDatabase(): void
+    {
+        try {
+            // Try to configure MySQL if available
+            $dbConfig = [
+                'host' => 'localhost',
+                'port' => 3306,
+                'user' => 'root',
+                'password' => '',
+                'database' => 'telegram_bot',
+            ];
+
+            // Try to enable MySQL - if it fails, we'll use direct API calls
+            $this->telegram->enableMySql($dbConfig, 'telegram_bot_');
+            $this->logger->info('MySQL database configured for bot');
+
+        } catch (\Exception $e) {
+            // MySQL not available - we'll use direct API calls in handleLongPolling
+            $this->logger->info('MySQL not available, using direct API calls for polling: ' . $e->getMessage());
         }
     }
 
@@ -147,27 +175,39 @@ class Bot
 
 
     /**
-     * Handle long polling mode
+     * Handle long polling mode (without MySQL requirement)
      */
     public function handleLongPolling(): void
     {
         try {
             $this->logger->info('Starting long polling mode...');
 
+            $lastUpdateId = 0;
+
             while (true) {
-                $serverResponse = $this->telegram->handleGetUpdates();
+                // Use direct API call to avoid MySQL requirement
+                $updates = $this->getUpdatesDirectly($lastUpdateId);
 
-                if ($serverResponse->isOk()) {
-                    $updates = $serverResponse->getResult();
-
-                    if (!empty($updates)) {
-                        $this->logger->info('Processed ' . count($updates) . ' updates');
-                        echo "📨 Processed " . count($updates) . " updates at " . date('H:i:s') . "\n";
+                if (!empty($updates)) {
+                    foreach ($updates as $update) {
+                        try {
+                            // Process each update
+                            $this->telegram->processUpdate($update);
+                            $lastUpdateId = max($lastUpdateId, $update->getUpdateId() + 1);
+                        } catch (\Exception $e) {
+                            $this->logger->error('Error processing update: ' . $e->getMessage());
+                        }
                     }
+
+                    $this->logger->info('Processed ' . count($updates) . ' updates');
+                    echo "📨 Processed " . count($updates) . " updates at " . date('H:i:s') . "\n";
                 } else {
-                    $this->logger->error('Long polling error: ' . $serverResponse->getDescription());
-                    echo "❌ Polling error: " . $serverResponse->getDescription() . "\n";
-                    sleep(5); // Wait before retry
+                    // No updates, just show heartbeat every 30 seconds
+                    static $lastHeartbeat = 0;
+                    if (time() - $lastHeartbeat > 30) {
+                        echo "💓 Bot is running... " . date('H:i:s') . "\n";
+                        $lastHeartbeat = time();
+                    }
                 }
 
                 sleep(1); // Prevent excessive API calls
@@ -179,6 +219,33 @@ class Bot
         } catch (\Exception $e) {
             $this->logger->critical('Critical error in long polling: ' . $e->getMessage());
             echo "💥 Critical error: " . $e->getMessage() . "\n";
+        }
+    }
+
+    /**
+     * Get updates directly from Telegram API without MySQL
+     */
+    private function getUpdatesDirectly(int $offset = 0): array
+    {
+        try {
+            $params = [
+                'offset' => $offset,
+                'limit' => 100,
+                'timeout' => 10
+            ];
+
+            $response = Request::getUpdates($params);
+
+            if ($response->isOk()) {
+                return $response->getResult();
+            } else {
+                $this->logger->error('Failed to get updates: ' . $response->getDescription());
+                return [];
+            }
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error getting updates: ' . $e->getMessage());
+            return [];
         }
     }
 
