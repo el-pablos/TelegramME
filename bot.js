@@ -211,6 +211,50 @@ function isOwner(userId) {
     return userId === OWNER_ID;
 }
 
+// Helper function to estimate user data center based on user ID
+function getUserDataCenter(userId) {
+    // Telegram data centers and their approximate ID ranges
+    const dataCenters = [
+        { dc: 'DC1', location: 'Miami, USA', range: [0, 200000000] },
+        { dc: 'DC2', location: 'Amsterdam, Netherlands', range: [200000000, 400000000] },
+        { dc: 'DC3', location: 'Miami, USA', range: [400000000, 600000000] },
+        { dc: 'DC4', location: 'Amsterdam, Netherlands', range: [600000000, 800000000] },
+        { dc: 'DC5', location: 'Singapore', range: [800000000, 1000000000] }
+    ];
+
+    for (const dc of dataCenters) {
+        if (userId >= dc.range[0] && userId < dc.range[1]) {
+            return dc;
+        }
+    }
+
+    // For very high IDs, estimate based on modulo
+    const dcIndex = userId % 5;
+    return dataCenters[dcIndex] || { dc: 'Unknown', location: 'Unknown' };
+}
+
+// Helper function to estimate account creation date based on user ID
+function getAccountCreationEstimate(userId) {
+    // Telegram started in 2013, user IDs are roughly sequential
+    // This is a very rough estimate
+    const telegramStart = new Date('2013-08-14'); // Telegram public launch
+    const now = new Date();
+    const totalTime = now.getTime() - telegramStart.getTime();
+
+    // Estimate based on user ID (very rough approximation)
+    // Assuming linear growth (which is not accurate but gives an idea)
+    const maxUserId = 2000000000; // Rough estimate of current max user ID
+    const userRatio = userId / maxUserId;
+    const estimatedTime = telegramStart.getTime() + (totalTime * userRatio);
+    const estimatedDate = new Date(estimatedTime);
+
+    // Format the date
+    const year = estimatedDate.getFullYear();
+    const month = estimatedDate.toLocaleString('id-ID', { month: 'long' });
+
+    return `${month} ${year}`;
+}
+
 // Main menu keyboard
 function getMainMenu() {
     return {
@@ -263,6 +307,139 @@ Selamat datang! Pilih aksi yang diinginkan:
         parse_mode: 'Markdown',
         ...getMainMenu()
     });
+});
+
+// Handle /id command
+bot.onText(/\/id/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    if (!isOwner(userId)) {
+        return bot.sendMessage(chatId, '❌ Akses ditolak. Hanya owner yang bisa menggunakan command ini.');
+    }
+
+    const chatType = msg.chat.type;
+    const chatTitle = msg.chat.title || 'Private Chat';
+
+    let infoText = `🆔 *Informasi Chat ID*\n\n`;
+    infoText += `📱 **Chat ID:** \`${chatId}\`\n`;
+    infoText += `📋 **Chat Type:** ${chatType}\n`;
+    infoText += `🏷️ **Chat Title:** ${chatTitle}\n`;
+
+    if (msg.chat.username) {
+        infoText += `👤 **Username:** @${msg.chat.username}\n`;
+    }
+
+    infoText += `\n💡 **Tip:** Copy chat ID di atas untuk keperluan konfigurasi bot`;
+
+    bot.sendMessage(chatId, infoText, { parse_mode: 'Markdown' });
+});
+
+// Handle /info command
+bot.onText(/\/info/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    if (!isOwner(userId)) {
+        return bot.sendMessage(chatId, '❌ Akses ditolak. Hanya owner yang bisa menggunakan command ini.');
+    }
+
+    let targetUser = null;
+    let targetUserId = null;
+
+    // Check if replying to a message
+    if (msg.reply_to_message) {
+        targetUser = msg.reply_to_message.from;
+        targetUserId = targetUser.id;
+    }
+    // Check if mentioning a user in the message
+    else if (msg.entities) {
+        const mention = msg.entities.find(entity => entity.type === 'mention' || entity.type === 'text_mention');
+        if (mention) {
+            if (mention.type === 'text_mention') {
+                targetUser = mention.user;
+                targetUserId = targetUser.id;
+            } else if (mention.type === 'mention') {
+                const username = msg.text.substring(mention.offset + 1, mention.offset + mention.length);
+                try {
+                    // Try to get user info by username (this might not always work)
+                    const chatMember = await bot.getChatMember(chatId, `@${username}`);
+                    targetUser = chatMember.user;
+                    targetUserId = targetUser.id;
+                } catch (error) {
+                    return bot.sendMessage(chatId, '❌ Tidak dapat mengambil informasi user dari username. Coba reply ke pesan user tersebut.');
+                }
+            }
+        }
+    }
+
+    if (!targetUser) {
+        return bot.sendMessage(chatId, '❌ Tidak ada user yang di-tag atau di-reply!\n\n💡 **Cara pakai:**\n• Reply ke pesan user dengan `/info`\n• Atau tag user: `/info @username`');
+    }
+
+    try {
+        // Get additional user info if possible
+        let chatMember = null;
+        try {
+            chatMember = await bot.getChatMember(chatId, targetUserId);
+        } catch (error) {
+            console.log('Could not get chat member info:', error.message);
+        }
+
+        let infoText = `👤 *Informasi User Telegram*\n\n`;
+        infoText += `🆔 **User ID:** \`${targetUser.id}\`\n`;
+        infoText += `👤 **First Name:** ${targetUser.first_name}\n`;
+
+        if (targetUser.last_name) {
+            infoText += `👤 **Last Name:** ${targetUser.last_name}\n`;
+        }
+
+        if (targetUser.username) {
+            infoText += `📝 **Username:** @${targetUser.username}\n`;
+        }
+
+        if (targetUser.language_code) {
+            infoText += `🌐 **Language:** ${targetUser.language_code.toUpperCase()}\n`;
+        }
+
+        // Bot status
+        if (targetUser.is_bot !== undefined) {
+            infoText += `🤖 **Is Bot:** ${targetUser.is_bot ? 'Ya' : 'Tidak'}\n`;
+        }
+
+        // Premium status (if available)
+        if (targetUser.is_premium !== undefined) {
+            infoText += `💎 **Premium:** ${targetUser.is_premium ? 'Ya' : 'Tidak'}\n`;
+        }
+
+        // Chat member status
+        if (chatMember) {
+            infoText += `👥 **Status di Chat:** ${chatMember.status}\n`;
+
+            if (chatMember.status === 'administrator' && chatMember.can_be_edited !== undefined) {
+                infoText += `🛡️ **Admin Rights:** ${chatMember.can_be_edited ? 'Full' : 'Limited'}\n`;
+            }
+
+            if (chatMember.until_date) {
+                const untilDate = new Date(chatMember.until_date * 1000);
+                infoText += `⏰ **Until:** ${untilDate.toLocaleString('id-ID')}\n`;
+            }
+        }
+
+        // Data center info (estimated based on user ID)
+        const dcInfo = getUserDataCenter(targetUser.id);
+        infoText += `🌍 **Data Center:** ${dcInfo.dc} (${dcInfo.location})\n`;
+
+        // Account creation estimate
+        const creationInfo = getAccountCreationEstimate(targetUser.id);
+        infoText += `📅 **Account Created:** ~${creationInfo}\n`;
+
+        bot.sendMessage(chatId, infoText, { parse_mode: 'Markdown' });
+
+    } catch (error) {
+        console.error('Info command error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengambil informasi user: ${error.message}`);
+    }
 });
 
 // Handle /addadmin command
