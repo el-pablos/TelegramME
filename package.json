@@ -1,13 +1,15 @@
 {
   "name": "pterodactyl-telegram-bot",
-  "version": "2.0.0",
-  "description": "Simple Pterodactyl Panel Control Bot - Node.js Version",
+  "version": "3.0.0",
+  "description": "Pterodactyl Panel Control Bot + Complete Rose Bot Features - Node.js Version",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
     "dev": "nodemon bot.js",
     "install-deps": "npm install",
-    "setup": "node setup.js"
+    "setup": "node setup.js",
+    "update": "./update.sh",
+    "manage": "./bot-manager.sh"
   },
   "keywords": [
     "telegram",
@@ -15,7 +17,11 @@
     "pterodactyl",
     "panel",
     "control",
-    "nodejs"
+    "nodejs",
+    "rose-bot",
+    "group-management",
+    "moderation",
+    "admin-tools"
   ],
   "author": "Pablos (@ImTamaa)",
   "license": "MIT",
