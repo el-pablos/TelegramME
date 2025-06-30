@@ -1,486 +1,266 @@
 #!/bin/bash
 
-# Smart Installation script untuk Pterodactyl Telegram Bot
+# Pterodactyl Telegram Bot - Node.js Installation Script
 # Author: Pablos (@ImTamaa)
-# Version: 2.0 - Smart Detection & Auto Deploy
+# Simple, Clean, and Working!
 
 set -e
 
-echo "🚀 Pterodactyl Telegram Bot - Smart Installation Script"
-echo "======================================================="
+echo "🚀 Pterodactyl Telegram Bot - Node.js Installation"
+echo "================================================="
 echo ""
 
 # Colors
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-# Functions
-print_success() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}❌ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠️ $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ️ $1${NC}"
-}
-
-print_skip() {
-    echo -e "${CYAN}⏭️ $1${NC}"
-}
-
-print_header() {
-    echo -e "${PURPLE}🔧 $1${NC}"
-}
+print_success() { echo -e "${GREEN}✅ $1${NC}"; }
+print_error() { echo -e "${RED}❌ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠️ $1${NC}"; }
+print_info() { echo -e "${BLUE}ℹ️ $1${NC}"; }
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
-   print_info "Running as root - will setup with proper permissions"
+   print_info "Running as root - perfect for VPS!"
    RUNNING_AS_ROOT=true
-   INSTALL_USER="root"
-   INSTALL_GROUP="root"
 else
-   print_info "Running as regular user with sudo"
+   print_info "Running as regular user"
    RUNNING_AS_ROOT=false
-   INSTALL_USER="$USER"
-   INSTALL_GROUP="www-data"
 fi
 
-# Check OS and version
-check_os() {
-    if [[ "$OSTYPE" != "linux-gnu"* ]]; then
-        print_error "This script is designed for Linux systems"
-        exit 1
-    fi
+echo ""
 
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS=$NAME
-        VER=$VERSION_ID
-        print_info "Detected OS: $OS $VER"
-
-        if [[ $ID != "ubuntu" ]]; then
-            print_warning "This script is optimized for Ubuntu. Proceeding anyway..."
-        fi
-    else
-        print_warning "Cannot detect OS version. Proceeding anyway..."
-    fi
-}
-
-# Check if package is installed
-is_installed() {
-    dpkg -l | grep -q "^ii  $1 " 2>/dev/null
-}
-
-# Check if service exists
-service_exists() {
-    systemctl list-unit-files | grep -q "^$1.service" 2>/dev/null
-}
-
-# Check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Check PHP version
-check_php_version() {
-    if command_exists php; then
-        PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
-        print_info "Detected PHP version: $PHP_VERSION"
-        if [[ $(echo "$PHP_VERSION >= 8.1" | bc -l) -eq 1 ]]; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Detect PHP version and set package names
-detect_php_packages() {
-    if command_exists php; then
-        PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
-        PHP_MAJOR=$(php -r "echo PHP_MAJOR_VERSION;")
-        PHP_MINOR=$(php -r "echo PHP_MINOR_VERSION;")
-
-        if [[ $PHP_MAJOR -eq 8 && $PHP_MINOR -ge 1 ]]; then
-            PHP_PACKAGE_VERSION="php${PHP_MAJOR}.${PHP_MINOR}"
-            print_success "Using existing PHP $PHP_VERSION"
-            return 0
-        fi
-    fi
-
-    # Default to PHP 8.3 if not found or version too old
-    PHP_PACKAGE_VERSION="php8.3"
-    print_info "Will install PHP 8.3"
-    return 1
-}
-
-# Get user input with default
-get_input() {
-    local prompt="$1"
-    local default="$2"
-    local result
-
-    if [ -n "$default" ]; then
-        read -p "$prompt [$default]: " result
-        echo "${result:-$default}"
-    else
-        read -p "$prompt: " result
-        echo "$result"
-    fi
-}
-
-# Variables
-BOT_DIR="/var/www/pterodactyl-bot"
-SERVICE_NAME="pterodactyl-bot"
-
-# Detect PHP version and set packages
-detect_php_packages
-
-# Fix PHP 8.3+ package names (json is built-in since PHP 8.0)
-if [[ $PHP_PACKAGE_VERSION == "php8.3" ]] || [[ $PHP_PACKAGE_VERSION == "php8.4" ]]; then
-    REQUIRED_PACKAGES="$PHP_PACKAGE_VERSION ${PHP_PACKAGE_VERSION}-cli ${PHP_PACKAGE_VERSION}-curl ${PHP_PACKAGE_VERSION}-sqlite3 ${PHP_PACKAGE_VERSION}-mbstring ${PHP_PACKAGE_VERSION}-xml curl unzip git supervisor"
-else
-    REQUIRED_PACKAGES="$PHP_PACKAGE_VERSION ${PHP_PACKAGE_VERSION}-cli ${PHP_PACKAGE_VERSION}-curl ${PHP_PACKAGE_VERSION}-json ${PHP_PACKAGE_VERSION}-sqlite3 ${PHP_PACKAGE_VERSION}-mbstring ${PHP_PACKAGE_VERSION}-xml curl unzip git supervisor"
+# Set installation directory
+BOT_DIR="/root/pterodactyl-bot"
+if [[ $RUNNING_AS_ROOT != true ]]; then
+    BOT_DIR="$HOME/pterodactyl-bot"
 fi
 
-# Start installation
-print_header "Starting Smart Installation Process"
-check_os
+print_info "Installation directory: $BOT_DIR"
+echo ""
 
-# Interactive configuration
-print_header "Configuration Setup"
-BOT_DIR=$(get_input "Bot installation directory" "$BOT_DIR")
-DEPLOYMENT_MODE="polling"
-print_info "Deployment mode: Polling (no web server needed)"
-
-# 1. Update system
-print_header "System Update"
-if [ -f /var/lib/apt/periodic/update-success-stamp ]; then
-    LAST_UPDATE=$(stat -c %Y /var/lib/apt/periodic/update-success-stamp)
-    CURRENT_TIME=$(date +%s)
-    TIME_DIFF=$((CURRENT_TIME - LAST_UPDATE))
-
-    if [ $TIME_DIFF -lt 3600 ]; then
-        print_skip "System updated recently (less than 1 hour ago)"
-    else
-        print_info "Updating system packages..."
-        if [[ $RUNNING_AS_ROOT == true ]]; then
-            apt update && apt upgrade -y
+# Check for existing .env
+if [ -f ".env" ]; then
+    BOT_TOKEN=$(grep "^BOT_TOKEN=" .env 2>/dev/null | cut -d'=' -f2)
+    OWNER_ID=$(grep "^OWNER_TELEGRAM_ID=" .env 2>/dev/null | cut -d'=' -f2)
+    PANEL_URL=$(grep "^PTERODACTYL_PANEL_URL=" .env 2>/dev/null | cut -d'=' -f2)
+    APP_KEY=$(grep "^PTERODACTYL_APPLICATION_API_KEY=" .env 2>/dev/null | cut -d'=' -f2)
+    CLIENT_KEY=$(grep "^PTERODACTYL_CLIENT_API_KEY=" .env 2>/dev/null | cut -d'=' -f2)
+    
+    if [ -n "$BOT_TOKEN" ] && [ -n "$OWNER_ID" ] && [ -n "$PANEL_URL" ] && [ -n "$APP_KEY" ] && [ -n "$CLIENT_KEY" ]; then
+        print_success "Found existing .env configuration!"
+        echo "  Bot Token: ${BOT_TOKEN:0:10}..."
+        echo "  Owner ID: $OWNER_ID"
+        echo "  Panel URL: $PANEL_URL"
+        echo ""
+        read -p "Use existing configuration? (y/n): " USE_EXISTING
+        if [ "$USE_EXISTING" = "y" ]; then
+            SKIP_CONFIG=true
         else
-            sudo apt update && sudo apt upgrade -y
+            SKIP_CONFIG=false
         fi
-        print_success "System updated"
+    else
+        SKIP_CONFIG=false
     fi
 else
-    print_info "Updating system packages..."
-    if [[ $RUNNING_AS_ROOT == true ]]; then
-        apt update && apt upgrade -y
-    else
-        sudo apt update && sudo apt upgrade -y
-    fi
-    print_success "System updated"
+    SKIP_CONFIG=false
 fi
 
-# 2. Install required packages
-print_header "Package Installation"
-PACKAGES_TO_INSTALL=""
+# Get configuration if needed
+if [ "$SKIP_CONFIG" != "true" ]; then
+    print_info "Setting up bot configuration..."
+    echo ""
+    read -p "🤖 Bot Token: " BOT_TOKEN
+    read -p "👤 Your Telegram ID: " OWNER_ID
+    read -p "🌐 Pterodactyl Panel URL: " PANEL_URL
+    read -p "🔑 Application API Key: " APP_KEY
+    read -p "🔑 Client API Key: " CLIENT_KEY
+    echo ""
+fi
 
-for package in $REQUIRED_PACKAGES; do
-    if is_installed "$package"; then
-        print_skip "$package already installed"
-    else
-        PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL $package"
-    fi
-done
+print_info "Configuration:"
+echo "  Bot Directory: $BOT_DIR"
+echo "  Owner ID: $OWNER_ID"
+echo "  Panel URL: $PANEL_URL"
+echo ""
 
-# Check for composer separately
-if command_exists composer; then
-    print_skip "Composer already installed"
+read -p "Continue with installation? (y/n): " CONFIRM
+if [ "$CONFIRM" != "y" ]; then
+    print_error "Installation cancelled"
+    exit 1
+fi
+
+echo ""
+
+# Update system
+print_info "Updating system packages..."
+if [[ $RUNNING_AS_ROOT == true ]]; then
+    apt update -qq
 else
-    print_info "Installing Composer..."
-    curl -sS https://getcomposer.org/installer | php
-    if [[ $RUNNING_AS_ROOT == true ]]; then
-        mv composer.phar /usr/local/bin/composer
-        chmod +x /usr/local/bin/composer
-    else
-        sudo mv composer.phar /usr/local/bin/composer
-        sudo chmod +x /usr/local/bin/composer
-    fi
-    print_success "Composer installed"
+    sudo apt update -qq
 fi
 
-if [ -n "$PACKAGES_TO_INSTALL" ]; then
-    print_info "Installing packages:$PACKAGES_TO_INSTALL"
+# Install Node.js if not present
+if ! command -v node >/dev/null 2>&1; then
+    print_info "Installing Node.js..."
     if [[ $RUNNING_AS_ROOT == true ]]; then
-        apt install -y $PACKAGES_TO_INSTALL
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        apt-get install -y nodejs
     else
-        sudo apt install -y $PACKAGES_TO_INSTALL
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs
     fi
-    print_success "New packages installed"
+    print_success "Node.js installed"
 else
-    print_skip "All required packages already installed"
+    NODE_VERSION=$(node --version)
+    print_success "Node.js already installed: $NODE_VERSION"
 fi
 
-# 3. Create bot directory
-print_header "Bot Directory Setup"
-if [ -d "$BOT_DIR" ]; then
-    print_warning "Bot directory already exists: $BOT_DIR"
-    OVERWRITE=$(get_input "Overwrite existing installation? (y/n)" "n")
-    if [ "$OVERWRITE" = "y" ]; then
-        print_info "Backing up existing installation..."
-        sudo mv "$BOT_DIR" "${BOT_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
-        print_success "Backup created"
+# Install npm if not present
+if ! command -v npm >/dev/null 2>&1; then
+    print_info "Installing npm..."
+    if [[ $RUNNING_AS_ROOT == true ]]; then
+        apt-get install -y npm
     else
-        print_error "Installation cancelled"
-        exit 1
+        sudo apt-get install -y npm
     fi
+    print_success "npm installed"
+else
+    NPM_VERSION=$(npm --version)
+    print_success "npm already installed: $NPM_VERSION"
 fi
 
+# Create bot directory
 print_info "Creating bot directory..."
 if [[ $RUNNING_AS_ROOT == true ]]; then
     mkdir -p $BOT_DIR
-    chown $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
-    chmod 755 $BOT_DIR
+    chown root:root $BOT_DIR
 else
-    sudo mkdir -p $BOT_DIR
-    sudo chown $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
-    sudo chmod 755 $BOT_DIR
+    mkdir -p $BOT_DIR
 fi
-print_success "Bot directory created: $BOT_DIR"
 
-# 4. Copy files
-print_header "File Deployment"
+# Copy files
 print_info "Copying bot files..."
-cp -r . $BOT_DIR/
-cd $BOT_DIR
+cp package.json $BOT_DIR/
+cp bot.js $BOT_DIR/
+cp health.js $BOT_DIR/
+cp setup.js $BOT_DIR/
 
-# Remove unnecessary files
-rm -f $BOT_DIR/*.zip $BOT_DIR/.git* 2>/dev/null || true
-print_success "Files copied and cleaned"
-
-# 5. Install dependencies
-print_header "PHP Dependencies"
-if [ -d "$BOT_DIR/vendor" ] && [ -f "$BOT_DIR/composer.lock" ]; then
-    print_skip "Dependencies already installed"
-    print_info "Updating dependencies..."
-    composer update --no-dev --optimize-autoloader
+# Create .env file
+if [ "$SKIP_CONFIG" != "true" ]; then
+    print_info "Creating configuration file..."
+    cat > $BOT_DIR/.env << EOF
+# Pterodactyl Telegram Bot Configuration
+BOT_TOKEN=$BOT_TOKEN
+BOT_USERNAME=pterodactyl_control_bot
+OWNER_TELEGRAM_ID=$OWNER_ID
+PTERODACTYL_PANEL_URL=$PANEL_URL
+PTERODACTYL_APPLICATION_API_KEY=$APP_KEY
+PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY
+LOG_LEVEL=INFO
+DEBUG_MODE=false
+AUTHOR_NAME=Pablos
+AUTHOR_TELEGRAM=@ImTamaa
+EOF
 else
-    print_info "Installing PHP dependencies..."
-    composer install --no-dev --optimize-autoloader
+    print_info "Using existing configuration..."
+    cp .env $BOT_DIR/
 fi
-print_success "Dependencies ready"
 
-# 6. Setup permissions
-print_header "Permissions Setup"
-print_info "Setting up permissions..."
+# Install dependencies
+print_info "Installing Node.js dependencies..."
+cd $BOT_DIR
+npm install --production
+
+# Set permissions
+print_info "Setting permissions..."
 if [[ $RUNNING_AS_ROOT == true ]]; then
-    chown -R $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
-    chmod -R 755 $BOT_DIR
-    chmod -R 777 $BOT_DIR/logs
+    chown -R root:root $BOT_DIR
+    chmod +x $BOT_DIR/bot.js
+    chmod +x $BOT_DIR/health.js
 else
-    sudo chown -R $INSTALL_USER:$INSTALL_GROUP $BOT_DIR
-    sudo chmod -R 755 $BOT_DIR
-    sudo chmod -R 777 $BOT_DIR/logs
-fi
-print_success "Permissions set"
-
-# 7. Setup environment
-print_header "Environment Configuration"
-if [ ! -f "$BOT_DIR/.env" ]; then
-    cp $BOT_DIR/.env.example $BOT_DIR/.env
-    print_success ".env file created from template"
-
-    # Interactive configuration
-    print_info "Configuring bot settings..."
-    BOT_TOKEN=$(get_input "Bot Token" "")
-    OWNER_ID=$(get_input "Owner Telegram ID" "")
-    PANEL_URL=$(get_input "Pterodactyl Panel URL" "")
-    APP_KEY=$(get_input "Application API Key" "")
-    CLIENT_KEY=$(get_input "Client API Key" "")
-
-    # Update .env file
-    sed -i "s|BOT_TOKEN=.*|BOT_TOKEN=$BOT_TOKEN|g" $BOT_DIR/.env
-    sed -i "s|OWNER_TELEGRAM_ID=.*|OWNER_TELEGRAM_ID=$OWNER_ID|g" $BOT_DIR/.env
-    sed -i "s|PTERODACTYL_PANEL_URL=.*|PTERODACTYL_PANEL_URL=$PANEL_URL|g" $BOT_DIR/.env
-    sed -i "s|PTERODACTYL_APPLICATION_API_KEY=.*|PTERODACTYL_APPLICATION_API_KEY=$APP_KEY|g" $BOT_DIR/.env
-    sed -i "s|PTERODACTYL_CLIENT_API_KEY=.*|PTERODACTYL_CLIENT_API_KEY=$CLIENT_KEY|g" $BOT_DIR/.env
-
-
-
-    print_success "Environment configured"
-else
-    print_skip ".env file already exists"
+    chmod +x $BOT_DIR/bot.js
+    chmod +x $BOT_DIR/health.js
 fi
 
-# 8. Skip web server (polling mode only)
-print_header "Web Server Configuration"
-print_skip "Web server not needed for polling mode"
+# Create systemd service
+print_info "Creating systemd service..."
+SERVICE_CONTENT="[Unit]
+Description=Pterodactyl Telegram Control Bot (Node.js)
+After=network.target
 
-# 9. Setup Service (Supervisor and Systemd)
-print_header "Service Configuration"
+[Service]
+Type=simple
+User=$(whoami)
+WorkingDirectory=$BOT_DIR
+ExecStart=/usr/bin/node $BOT_DIR/bot.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
 
-# Setup Supervisor for polling mode
-if [ -f "/etc/supervisor/conf.d/$SERVICE_NAME.conf" ]; then
-    print_skip "Supervisor configuration already exists"
+[Install]
+WantedBy=multi-user.target"
+
+if [[ $RUNNING_AS_ROOT == true ]]; then
+    echo "$SERVICE_CONTENT" > /etc/systemd/system/pterodactyl-bot.service
+    systemctl daemon-reload
+    systemctl enable pterodactyl-bot
 else
-    print_info "Setting up Supervisor for polling mode..."
-    sudo cp $BOT_DIR/supervisor.conf /etc/supervisor/conf.d/$SERVICE_NAME.conf
-    sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/supervisor/conf.d/$SERVICE_NAME.conf
-
-    if [[ $RUNNING_AS_ROOT == true ]]; then
-        if supervisorctl reread && supervisorctl update; then
-            print_success "Supervisor configured"
-        else
-            print_warning "Supervisor configuration may need manual review"
-        fi
-    else
-        if sudo supervisorctl reread && sudo supervisorctl update; then
-            print_success "Supervisor configured"
-        else
-            print_warning "Supervisor configuration may need manual review"
-        fi
-    fi
+    echo "$SERVICE_CONTENT" | sudo tee /etc/systemd/system/pterodactyl-bot.service > /dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl enable pterodactyl-bot
 fi
 
-# Setup systemd service (alternative)
-if service_exists "$SERVICE_NAME"; then
-    print_skip "Systemd service already exists"
-else
-    print_info "Setting up systemd service..."
-    if [[ $RUNNING_AS_ROOT == true ]]; then
-        cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
-        sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
-        sed -i "s|User=www-data|User=$INSTALL_USER|g" /etc/systemd/system/$SERVICE_NAME.service
-        sed -i "s|Group=www-data|Group=$INSTALL_GROUP|g" /etc/systemd/system/$SERVICE_NAME.service
-
-        systemctl daemon-reload
-        systemctl enable $SERVICE_NAME
-    else
-        sudo cp $BOT_DIR/systemd.service /etc/systemd/system/$SERVICE_NAME.service
-        sudo sed -i "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" /etc/systemd/system/$SERVICE_NAME.service
-        sudo sed -i "s|User=www-data|User=$INSTALL_USER|g" /etc/systemd/system/$SERVICE_NAME.service
-        sudo sed -i "s|Group=www-data|Group=$INSTALL_GROUP|g" /etc/systemd/system/$SERVICE_NAME.service
-
-        sudo systemctl daemon-reload
-        sudo systemctl enable $SERVICE_NAME
-    fi
-    print_success "Systemd service configured"
-fi
-
-# 10. Setup cron jobs
-print_header "Cron Jobs Setup"
-if crontab -l 2>/dev/null | grep -q "pterodactyl-bot"; then
-    print_skip "Cron jobs already configured"
-else
-    print_info "Setting up cron jobs..."
-    # Create cron file with updated paths
-    sed "s|/path/to/pterodactyl-telegram-bot|$BOT_DIR|g" $BOT_DIR/crontab.txt > /tmp/pterodactyl-bot-cron
-
-    # Merge with existing crontab
-    (crontab -l 2>/dev/null; cat /tmp/pterodactyl-bot-cron) | crontab -
-    rm /tmp/pterodactyl-bot-cron
-    print_success "Cron jobs configured"
-fi
-
-# 11. Create log directories
-print_header "Logging Setup"
-LOG_DIRS="/var/log/supervisor /var/log/nginx"
-for dir in $LOG_DIRS; do
-    if [ ! -d "$dir" ]; then
-        sudo mkdir -p "$dir"
-    fi
-done
-
-LOG_FILES="/var/log/pterodactyl-bot-cron.log /var/log/pterodactyl-bot-health.log"
-for file in $LOG_FILES; do
-    if [ ! -f "$file" ]; then
-        sudo touch "$file"
-        sudo chown $USER:www-data "$file"
-    fi
-done
-print_success "Log directories and files ready"
-
-# 12. SSL Setup (not needed for polling mode)
-print_header "SSL Configuration"
-print_skip "SSL not needed for polling mode"
-
-# 13. Run tests
-print_header "System Testing"
+# Test bot
+print_info "Testing bot..."
 cd $BOT_DIR
-print_info "Running comprehensive tests..."
-
-if php test.php; then
-    print_success "All tests passed!"
+if node health.js >/dev/null 2>&1; then
+    print_success "Bot health check passed!"
 else
-    print_warning "Some tests failed. Check the output above."
+    print_warning "Bot health check failed - check configuration"
 fi
 
-# 14. Final setup and start services
-print_header "Service Startup"
-print_info "Starting polling service..."
-if service_exists "$SERVICE_NAME"; then
-    sudo systemctl start $SERVICE_NAME
-    if sudo systemctl is-active --quiet $SERVICE_NAME; then
-        print_success "Service started successfully"
-    else
-        print_warning "Service failed to start - check logs"
-    fi
-fi
-
-# 15. Final health check
-print_header "Final Health Check"
-cd $BOT_DIR
-if php deploy.php health >/dev/null 2>&1; then
-    print_success "Health check passed!"
+# Start service
+print_info "Starting bot service..."
+if [[ $RUNNING_AS_ROOT == true ]]; then
+    systemctl start pterodactyl-bot
 else
-    print_warning "Health check failed - manual configuration may be needed"
+    sudo systemctl start pterodactyl-bot
+fi
+
+sleep 3
+
+# Check service status
+if systemctl is-active --quiet pterodactyl-bot; then
+    print_success "Bot service started successfully!"
+else
+    print_warning "Bot service failed to start - check logs"
 fi
 
 echo ""
-print_success "🎉 Installation completed successfully!"
+print_success "🎉 Installation completed!"
 echo ""
 
-print_header "📋 Installation Summary"
-echo "Bot Directory: $BOT_DIR"
-echo "Deployment Mode: $DEPLOYMENT_MODE (Polling)"
-echo "Service: $SERVICE_NAME"
+print_info "📋 Installation Summary:"
+echo "  Bot Directory: $BOT_DIR"
+echo "  Service: pterodactyl-bot"
+echo "  Runtime: Node.js"
 echo ""
 
-print_header "🚀 Next Steps"
-echo "1. Check service: sudo systemctl status $SERVICE_NAME"
-echo "2. Send /start to your Telegram bot"
-echo "3. Monitor logs: sudo journalctl -u $SERVICE_NAME -f"
-echo "4. Manual start: cd $BOT_DIR && php index.php polling"
+print_info "🚀 Next Steps:"
+echo "1. Send /start to your Telegram bot"
+echo "2. Test bot features"
+echo "3. Check service: systemctl status pterodactyl-bot"
+echo "4. View logs: journalctl -u pterodactyl-bot -f"
 echo ""
 
-print_header "🛠️ Useful Commands"
-echo "• Health check: cd $BOT_DIR && php deploy.php health"
-echo "• Bot stats: cd $BOT_DIR && php deploy.php stats"
-echo "• Run tests: cd $BOT_DIR && php test.php"
-echo "• Cleanup: cd $BOT_DIR && php deploy.php cleanup"
-echo "• Restart service: sudo systemctl restart $SERVICE_NAME"
-echo "• Check nginx: sudo nginx -t && sudo systemctl status nginx"
+print_info "🔧 Useful Commands:"
+echo "  cd $BOT_DIR && node health.js    # Health check"
+echo "  cd $BOT_DIR && node bot.js       # Manual start"
+echo "  systemctl restart pterodactyl-bot # Restart service"
 echo ""
 
-print_header "📁 Important Files"
-echo "• Configuration: $BOT_DIR/.env"
-echo "• Service config: /etc/systemd/system/$SERVICE_NAME.service"
-echo "• Supervisor config: /etc/supervisor/conf.d/$SERVICE_NAME.conf"
-echo "• Bot logs: $BOT_DIR/logs/"
-echo "• System logs: /var/log/pterodactyl-bot-*.log"
-echo ""
-
-print_success "🤖 Happy botting! Your Pterodactyl Telegram Bot is ready!"
-echo ""
-print_info "Need help? Contact @ImTamaa on Telegram"
+print_success "🤖 Your Node.js Telegram bot is ready!"
