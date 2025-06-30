@@ -1,17 +1,17 @@
-# Crontab entries untuk Pterodactyl Telegram Bot
+# Crontab entries untuk TelegramME Bot
 # Tambahkan entries ini ke crontab dengan: crontab -e
 
 # Cleanup old logs setiap hari jam 2 pagi
-0 2 * * * /usr/bin/php /path/to/pterodactyl-telegram-bot/deploy.php cleanup >> /var/log/pterodactyl-bot-cron.log 2>&1
+0 2 * * * /usr/bin/node /root/TelegramME/deploy.js cleanup >> /var/log/TelegramME-cron.log 2>&1
 
 # Health check setiap 5 menit
-*/5 * * * * /usr/bin/php /path/to/pterodactyl-telegram-bot/deploy.php health >> /var/log/pterodactyl-bot-health.log 2>&1
+*/5 * * * * /usr/bin/node /root/TelegramME/health.js >> /var/log/TelegramME-health.log 2>&1
 
-# Backup database setiap hari jam 3 pagi
-0 3 * * * cp /path/to/pterodactyl-telegram-bot/logs/bot.db /path/to/backups/bot-$(date +\%Y\%m\%d).db
+# Backup logs setiap hari jam 3 pagi
+0 3 * * * cp /root/TelegramME/bot.log /root/backups/bot-$(date +\%Y\%m\%d).log
 
 # Restart bot service setiap minggu (opsional)
-0 4 * * 0 systemctl restart pterodactyl-bot
+0 4 * * 0 systemctl restart TelegramME
 
 # Monitor disk space dan kirim alert jika > 80%
 0 */6 * * * df -h | awk '$5 > 80 {print $0}' | mail -s "Disk Space Alert" admin@yourdomain.com

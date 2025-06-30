@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Pterodactyl Bot Manager Script
+# TelegramME Bot Manager Script
 # Author: Pablos (@ImTamaa)
 # Usage: ./bot-manager.sh [start|stop|restart|status|logs]
 
@@ -157,14 +157,14 @@ show_status() {
         if command -v pm2 &> /dev/null; then
             echo ""
             print_info "📊 Status PM2:"
-            pm2 list | grep pterodactyl-bot
+            pm2 list | grep TelegramME
         fi
-        
+
         # Show screen sessions
         if command -v screen &> /dev/null; then
             echo ""
             print_info "📺 Screen Sessions:"
-            screen -ls | grep pterodactyl-bot || echo "   Tidak ada screen session"
+            screen -ls | grep TelegramME || echo "   Tidak ada screen session"
         fi
         
     else
@@ -184,21 +184,21 @@ show_status() {
 
 # Function to show logs
 show_logs() {
-    print_info "📋 Menampilkan log Pterodactyl Bot..."
+    print_info "📋 Menampilkan log TelegramME..."
     echo ""
-    
-    if command -v pm2 &> /dev/null && pm2 list | grep -q pterodactyl-bot; then
+
+    if command -v pm2 &> /dev/null && pm2 list | grep -q TelegramME; then
         print_info "📊 PM2 Logs:"
-        pm2 logs pterodactyl-bot --lines 50
-        
+        pm2 logs TelegramME --lines 50
+
     elif [ -f "bot.log" ]; then
         print_info "📄 File Logs (bot.log):"
         tail -50 bot.log
-        
-    elif command -v screen &> /dev/null && screen -ls | grep -q pterodactyl-bot; then
-        print_info "📺 Screen session tersedia: pterodactyl-bot"
-        print_info "Gunakan 'screen -r pterodactyl-bot' untuk melihat log real-time"
-        
+
+    elif command -v screen &> /dev/null && screen -ls | grep -q TelegramME; then
+        print_info "📺 Screen session tersedia: TelegramME"
+        print_info "Gunakan 'screen -r TelegramME' untuk melihat log real-time"
+
     else
         print_warning "Tidak ada log yang tersedia"
     fi

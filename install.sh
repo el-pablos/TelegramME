@@ -34,9 +34,9 @@ fi
 echo ""
 
 # Set installation directory
-BOT_DIR="/root/pterodactyl-bot"
+BOT_DIR="/root/TelegramME"
 if [[ $RUNNING_AS_ROOT != true ]]; then
-    BOT_DIR="$HOME/pterodactyl-bot"
+    BOT_DIR="$HOME/TelegramME"
 fi
 
 print_info "Installation directory: $BOT_DIR"
@@ -189,7 +189,7 @@ fi
 # Create systemd service
 print_info "Creating systemd service..."
 SERVICE_CONTENT="[Unit]
-Description=Pterodactyl Telegram Control Bot (Node.js)
+Description=TelegramME Control Bot (Node.js)
 After=network.target
 
 [Service]
@@ -205,13 +205,13 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target"
 
 if [[ $RUNNING_AS_ROOT == true ]]; then
-    echo "$SERVICE_CONTENT" > /etc/systemd/system/pterodactyl-bot.service
+    echo "$SERVICE_CONTENT" > /etc/systemd/system/TelegramME.service
     systemctl daemon-reload
-    systemctl enable pterodactyl-bot
+    systemctl enable TelegramME
 else
-    echo "$SERVICE_CONTENT" | sudo tee /etc/systemd/system/pterodactyl-bot.service > /dev/null
+    echo "$SERVICE_CONTENT" | sudo tee /etc/systemd/system/TelegramME.service > /dev/null
     sudo systemctl daemon-reload
-    sudo systemctl enable pterodactyl-bot
+    sudo systemctl enable TelegramME
 fi
 
 # Test bot
@@ -226,15 +226,15 @@ fi
 # Start service
 print_info "Starting bot service..."
 if [[ $RUNNING_AS_ROOT == true ]]; then
-    systemctl start pterodactyl-bot
+    systemctl start TelegramME
 else
-    sudo systemctl start pterodactyl-bot
+    sudo systemctl start TelegramME
 fi
 
 sleep 3
 
 # Check service status
-if systemctl is-active --quiet pterodactyl-bot; then
+if systemctl is-active --quiet TelegramME; then
     print_success "Bot service started successfully!"
 else
     print_warning "Bot service failed to start - check logs"
@@ -246,21 +246,21 @@ echo ""
 
 print_info "📋 Installation Summary:"
 echo "  Bot Directory: $BOT_DIR"
-echo "  Service: pterodactyl-bot"
+echo "  Service: TelegramME"
 echo "  Runtime: Node.js"
 echo ""
 
 print_info "🚀 Next Steps:"
 echo "1. Send /start to your Telegram bot"
 echo "2. Test bot features"
-echo "3. Check service: systemctl status pterodactyl-bot"
-echo "4. View logs: journalctl -u pterodactyl-bot -f"
+echo "3. Check service: systemctl status TelegramME"
+echo "4. View logs: journalctl -u TelegramME -f"
 echo ""
 
 print_info "🔧 Useful Commands:"
 echo "  cd $BOT_DIR && node health.js    # Health check"
 echo "  cd $BOT_DIR && node bot.js       # Manual start"
-echo "  systemctl restart pterodactyl-bot # Restart service"
+echo "  systemctl restart TelegramME # Restart service"
 echo ""
 
 print_success "🤖 Your Node.js Telegram bot is ready!"
