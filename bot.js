@@ -10,6 +10,13 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 
+// Import Rose Bot modules
+const AdminModule = require('./modules/admin');
+const ModerationModule = require('./modules/moderation');
+const WelcomeModule = require('./modules/welcome');
+const NotesModule = require('./modules/notes');
+const LocksModule = require('./modules/locks');
+
 // Configuration
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_TELEGRAM_ID);
@@ -27,11 +34,19 @@ if (!BOT_TOKEN || !OWNER_ID || !PANEL_URL || !APP_API_KEY || !CLIENT_API_KEY) {
 // Initialize bot
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-console.log('🚀 Bot Telegram Pterodactyl Dimulai!');
+// Initialize Rose Bot modules
+const adminModule = new AdminModule(bot);
+const moderationModule = new ModerationModule(bot);
+const welcomeModule = new WelcomeModule(bot);
+const notesModule = new NotesModule(bot);
+const locksModule = new LocksModule(bot);
+
+console.log('🚀 Bot Telegram Pterodactyl + Rose Features Dimulai!');
 console.log('📱 Bot berjalan dan menunggu pesan...');
 console.log('⏰ Dimulai pada:', new Date().toLocaleString('id-ID'));
 console.log('👤 Owner ID:', OWNER_ID);
 console.log('🌐 Panel URL:', PANEL_URL);
+console.log('🌹 Rose Bot Features: Loaded!');
 
 // Pterodactyl API helper
 class PteroAPI {
@@ -286,11 +301,13 @@ bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
 
-    if (!isOwner(userId)) {
-        return bot.sendMessage(chatId, '❌ Akses ditolak. Bot ini bersifat privat.');
+    if (msg.chat.type === 'private' && !isOwner(userId)) {
+        return bot.sendMessage(chatId, '❌ Akses ditolak. Bot ini bersifat privat untuk owner.');
     }
 
-    const welcomeText = `🤖 *Bot Kontrol Panel Pterodactyl*
+    if (msg.chat.type === 'private') {
+        // Private chat - show Pterodactyl panel
+        const welcomeText = `🤖 *Bot Kontrol Panel Pterodactyl*
 
 Selamat datang! Pilih aksi yang diinginkan:
 
@@ -303,10 +320,36 @@ Selamat datang! Pilih aksi yang diinginkan:
 👥 Kelola Admin - Kelola admin panel
 🆕 Buat Server User - Buat server untuk user spesifik`;
 
-    bot.sendMessage(chatId, welcomeText, {
-        parse_mode: 'Markdown',
-        ...getMainMenu()
-    });
+        bot.sendMessage(chatId, welcomeText, {
+            parse_mode: 'Markdown',
+            ...getMainMenu()
+        });
+    } else {
+        // Group chat - show Rose Bot features
+        const groupWelcomeText = `🌹 *Rose Bot + Pterodactyl Panel*
+
+Halo! Saya adalah bot manajemen grup dengan fitur lengkap Rose Bot plus kontrol panel Pterodactyl.
+
+🛡️ **Fitur Moderasi:**
+• Ban, mute, kick, warn users
+• Anti-spam & antiflood protection
+• Message locks & restrictions
+
+💬 **Fitur Grup:**
+• Welcome/goodbye messages
+• Notes & filters (auto-reply)
+• Admin management tools
+
+📝 **Commands Utama:**
+• \`/help\` - Bantuan lengkap
+• \`/admins\` - Lihat daftar admin
+• \`/locks\` - Lihat status locks
+• \`/notes\` - Lihat notes tersimpan
+
+Gunakan \`/help\` untuk melihat semua commands yang tersedia!`;
+
+        bot.sendMessage(chatId, groupWelcomeText, { parse_mode: 'Markdown' });
+    }
 });
 
 // Handle /id command
@@ -441,6 +484,188 @@ bot.onText(/\/info/, async (msg) => {
         bot.sendMessage(chatId, `❌ Error saat mengambil informasi user: ${error.message}`);
     }
 });
+
+// Handle /help command
+bot.onText(/^\/help(@\w+)?(\s+(.+))?$/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const helpTopic = match[3];
+
+    if (helpTopic) {
+        // Show specific help topic
+        await showSpecificHelp(chatId, helpTopic);
+    } else {
+        // Show general help
+        await showGeneralHelp(chatId, msg.chat.type);
+    }
+});
+
+async function showGeneralHelp(chatId, chatType) {
+    if (chatType === 'private') {
+        // Private chat - show Pterodactyl help
+        const helpText = `🤖 *Bot Kontrol Panel Pterodactyl*
+
+**Commands Utama:**
+• \`/start\` - Menu utama
+• \`/id\` - Lihat chat ID
+• \`/info\` - Info user (reply/mention)
+
+**Panel Management:**
+• \`/addadmin\` - Tambah admin panel
+• \`/createserver\` - Buat server untuk user
+
+**Bantuan Spesifik:**
+• \`/help admin\` - Commands admin
+• \`/help moderation\` - Commands moderasi
+• \`/help welcome\` - Commands welcome
+• \`/help notes\` - Commands notes
+• \`/help locks\` - Commands locks`;
+
+        bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    } else {
+        // Group chat - show Rose Bot help
+        const helpText = `🌹 *Rose Bot Commands*
+
+**👥 Admin Management:**
+• \`/admins\` - Lihat daftar admin
+• \`/promote\` - Promote user jadi admin
+• \`/demote\` - Demote admin
+• \`/title\` - Set title admin
+
+**🛡️ Moderation:**
+• \`/ban\` - Ban user
+• \`/mute\` - Mute user
+• \`/kick\` - Kick user
+• \`/warn\` - Warn user
+
+**💬 Welcome & Messages:**
+• \`/welcome on/off\` - Toggle welcome
+• \`/setwelcome\` - Set welcome message
+• \`/notes\` - Lihat notes
+• \`/save\` - Simpan note
+
+**🔒 Locks & Security:**
+• \`/locks\` - Lihat status locks
+• \`/lock\` - Aktifkan lock
+• \`/antiflood\` - Anti-spam protection
+
+**Bantuan Detail:**
+• \`/help admin\` - Admin commands
+• \`/help moderation\` - Moderation commands
+• \`/help welcome\` - Welcome commands
+• \`/help notes\` - Notes & filters
+• \`/help locks\` - Locks & security`;
+
+        bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    }
+}
+
+async function showSpecificHelp(chatId, topic) {
+    const helpTopics = {
+        'admin': `👥 *Admin Management Commands*
+
+**Lihat Admin:**
+• \`/admins\` - Daftar semua admin grup
+
+**Promote/Demote:**
+• \`/promote\` - Promote user jadi admin (reply/mention)
+• \`/demote\` - Demote admin jadi member (reply/mention)
+• \`/title <title>\` - Set custom title admin (reply)
+
+**Contoh:**
+\`/promote\` (reply ke user)
+\`/title Super Admin\` (reply ke admin)`,
+
+        'moderation': `🛡️ *Moderation Commands*
+
+**Ban Commands:**
+• \`/ban [reason]\` - Ban user permanent
+• \`/tban <time> [reason]\` - Temporary ban
+• \`/unban\` - Unban user
+
+**Mute Commands:**
+• \`/mute [reason]\` - Mute user permanent
+• \`/tmute <time> [reason]\` - Temporary mute
+• \`/unmute\` - Unmute user
+
+**Other:**
+• \`/kick [reason]\` - Kick user dari grup
+• \`/warn [reason]\` - Beri warning
+• \`/warns\` - Lihat warnings user
+• \`/purge\` - Hapus pesan (reply ke pesan)
+
+**Time Format:**
+\`1m\` = 1 menit, \`1h\` = 1 jam, \`1d\` = 1 hari, \`1w\` = 1 minggu`,
+
+        'welcome': `💬 *Welcome & Goodbye Commands*
+
+**Welcome:**
+• \`/welcome on/off\` - Toggle welcome message
+• \`/setwelcome <text>\` - Set welcome message
+• \`/resetwelcome\` - Reset ke default
+• \`/cleanwelcome on/off\` - Auto hapus welcome lama
+
+**Goodbye:**
+• \`/goodbye on/off\` - Toggle goodbye message
+• \`/setgoodbye <text>\` - Set goodbye message
+• \`/resetgoodbye\` - Reset ke default
+
+**Variables:**
+\`{first}\` - Nama depan, \`{last}\` - Nama belakang
+\`{mention}\` - Mention user, \`{chatname}\` - Nama grup
+\`{count}\` - Jumlah member
+
+**Contoh:**
+\`/setwelcome Selamat datang {mention} di {chatname}!\``,
+
+        'notes': `📝 *Notes & Filters Commands*
+
+**Notes (Saved Messages):**
+• \`/save <name> <content>\` - Simpan note
+• \`/get <name>\` - Ambil note
+• \`#<name>\` - Shortcut ambil note
+• \`/notes\` - Lihat semua notes
+• \`/clear <name>\` - Hapus note
+
+**Filters (Auto-Reply):**
+• \`/filter <keyword> <response>\` - Tambah filter
+• \`/filters\` - Lihat semua filters
+• \`/stop <keyword>\` - Hapus filter
+• \`/stopall\` - Hapus semua filters
+
+**Contoh:**
+\`/save rules Dilarang spam di grup!\`
+\`/filter hello Halo juga! Selamat datang!\``,
+
+        'locks': `🔒 *Locks & Security Commands*
+
+**Lock Commands:**
+• \`/lock <type>\` - Aktifkan lock
+• \`/unlock <type>\` - Nonaktifkan lock
+• \`/locks\` - Lihat status semua locks
+• \`/locktypes\` - Lihat jenis locks
+
+**Lock Types:**
+\`text\` - Pesan teks, \`media\` - Semua media
+\`photo\` - Foto, \`video\` - Video, \`sticker\` - Sticker
+\`url\` - Link, \`forward\` - Forward message
+\`mention\` - Mention user, \`hashtag\` - Hashtag
+
+**Anti-Flood:**
+• \`/antiflood on/off\` - Toggle antiflood
+• \`/antiflood <number>\` - Set limit pesan
+
+**Contoh:**
+\`/lock sticker\` - Larang sticker
+\`/antiflood 5\` - Max 5 pesan per 10 detik`
+    };
+
+    const helpText = helpTopics[topic.toLowerCase()];
+    if (helpText) {
+        bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    } else {
+        bot.sendMessage(chatId, `❌ Help topic "${topic}" tidak ditemukan!\n\nTopics tersedia: admin, moderation, welcome, notes, locks`);
+    }
+}
 
 // Handle /addadmin command
 bot.onText(/\/addadmin (.+)/, async (msg, match) => {
