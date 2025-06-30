@@ -81,16 +81,68 @@ class PteroAPI {
 
     static async getAllServers() {
         const response = await this.appRequest('servers');
+        console.log('📊 API Response sample:', JSON.stringify(response.data?.[0], null, 2));
         return response.data || [];
     }
 
-    static async restartServer(serverUuid) {
+    static async restartServer(serverIdentifier) {
         try {
-            // Use client API for server power actions
-            await this.clientRequest(`servers/${serverUuid}/power`, 'POST', { signal: 'restart' });
-            return true;
+            console.log(`🔄 Attempting restart for server: ${serverIdentifier}`);
+
+            // Method 1: Try Client API endpoints
+            const clientEndpoints = [
+                `servers/${serverIdentifier}/power`,
+                `servers/${serverIdentifier}/power/restart`,
+                `${serverIdentifier}/power`
+            ];
+
+            for (const endpoint of clientEndpoints) {
+                try {
+                    console.log(`🔄 Trying Client API: /api/client/${endpoint}`);
+                    await this.clientRequest(endpoint, 'POST', { signal: 'restart' });
+                    console.log(`✅ Success with Client API: ${endpoint}`);
+                    return true;
+                } catch (endpointError) {
+                    console.log(`❌ Client API failed ${endpoint}:`, endpointError.response?.status, endpointError.response?.data?.errors?.[0]?.detail || endpointError.message);
+                    continue;
+                }
+            }
+
+            // Method 2: Try Application API endpoints
+            const appEndpoints = [
+                `servers/${serverIdentifier}/power`,
+                `servers/${serverIdentifier}/startup`,
+                `servers/${serverIdentifier}/suspend`,
+                `servers/${serverIdentifier}/unsuspend`
+            ];
+
+            for (const endpoint of appEndpoints) {
+                try {
+                    console.log(`🔄 Trying Application API: /api/application/${endpoint}`);
+                    await this.appRequest(endpoint, 'POST', { signal: 'restart' });
+                    console.log(`✅ Success with Application API: ${endpoint}`);
+                    return true;
+                } catch (endpointError) {
+                    console.log(`❌ Application API failed ${endpoint}:`, endpointError.response?.status, endpointError.response?.data?.errors?.[0]?.detail || endpointError.message);
+                    continue;
+                }
+            }
+
+            // Method 3: Try direct server management
+            try {
+                console.log(`🔄 Trying server suspend/unsuspend method`);
+                await this.appRequest(`servers/${serverIdentifier}/suspend`, 'POST');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.appRequest(`servers/${serverIdentifier}/unsuspend`, 'POST');
+                console.log(`✅ Success with suspend/unsuspend method`);
+                return true;
+            } catch (suspendError) {
+                console.log(`❌ Suspend/unsuspend failed:`, suspendError.response?.status, suspendError.response?.data?.errors?.[0]?.detail || suspendError.message);
+            }
+
+            return false;
         } catch (error) {
-            console.error(`Failed to restart server ${serverUuid}:`, error.response?.data || error.message);
+            console.error(`❌ All restart attempts failed for ${serverIdentifier}:`, error.response?.data || error.message);
             return false;
         }
     }
@@ -282,6 +334,9 @@ bot.on('callback_query', async (query) => {
         case 'health_check':
             await handleHealthCheck(chatId);
             break;
+        case 'test_api':
+            await handleTestAPI(chatId);
+            break;
         case 'manage_admins':
             await handleManageAdmins(chatId);
             break;
@@ -347,18 +402,39 @@ async function handleMassRestart(chatId) {
 
         for (const server of servers) {
             const serverName = server.attributes.name;
-            const serverUuid = server.attributes.uuid; // Use UUID instead of ID
+            const serverUuid = server.attributes.uuid;
+            const serverId = server.attributes.id;
+            const serverIdentifier = server.attributes.identifier;
+
+            console.log(`📊 Server details:`, {
+                name: serverName,
+                uuid: serverUuid,
+                id: serverId,
+                identifier: serverIdentifier
+            });
 
             try {
-                console.log(`Attempting to restart server: ${serverName} (${serverUuid})`);
-                const success = await PteroAPI.restartServer(serverUuid);
+                console.log(`🔄 Attempting to restart server: ${serverName}`);
+
+                // Try different identifiers
+                const identifiers = [serverUuid, serverIdentifier, serverId].filter(Boolean);
+                let success = false;
+
+                for (const identifier of identifiers) {
+                    console.log(`🔄 Trying identifier: ${identifier}`);
+                    success = await PteroAPI.restartServer(identifier);
+                    if (success) {
+                        console.log(`✅ Successfully restarted ${serverName} using identifier: ${identifier}`);
+                        break;
+                    }
+                }
+
                 if (success) {
                     successCount++;
-                    console.log(`✅ Successfully restarted: ${serverName}`);
                 } else {
                     failedCount++;
                     failedServers.push(serverName);
-                    console.log(`❌ Failed to restart: ${serverName}`);
+                    console.log(`❌ All identifiers failed for: ${serverName}`);
                 }
             } catch (error) {
                 failedCount++;
@@ -367,7 +443,7 @@ async function handleMassRestart(chatId) {
             }
 
             // Small delay to prevent API rate limiting
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         let report = `🔄 *Restart Semua Selesai*\n\n`;
@@ -507,7 +583,86 @@ async function handleServerStats(chatId) {
 async function handleHealthCheck(chatId) {
     const text = `🏥 *Cek Kesehatan*\n\n✅ Bot: Online\n✅ API: Terhubung\n✅ Panel: ${PANEL_URL}\n⏰ Uptime: ${process.uptime().toFixed(0)}s`;
 
-    bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...getMainMenu() });
+    const keyboard = {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '🧪 Test API Endpoints', callback_data: 'test_api' }
+                ],
+                [
+                    { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+                ]
+            ]
+        }
+    };
+
+    bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+}
+
+// Test API Endpoints
+async function handleTestAPI(chatId) {
+    try {
+        bot.sendMessage(chatId, '🧪 *Test API Endpoints*\n\nMengambil server pertama untuk test...', { parse_mode: 'Markdown' });
+
+        const servers = await PteroAPI.getAllServers();
+
+        if (servers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server untuk ditest!', getMainMenu());
+        }
+
+        const testServer = servers[0];
+        const serverName = testServer.attributes.name;
+        const serverUuid = testServer.attributes.uuid;
+        const serverId = testServer.attributes.id;
+        const serverIdentifier = testServer.attributes.identifier;
+
+        let testResults = `🧪 *Test API Results*\n\n`;
+        testResults += `🖥️ **Test Server:** ${serverName}\n`;
+        testResults += `🆔 **ID:** ${serverId}\n`;
+        testResults += `🔑 **UUID:** ${serverUuid}\n`;
+        testResults += `📝 **Identifier:** ${serverIdentifier}\n\n`;
+        testResults += `**Endpoint Tests:**\n`;
+
+        // Test different endpoints
+        const endpoints = [
+            `servers/${serverUuid}/power`,
+            `servers/${serverIdentifier}/power`,
+            `servers/${serverId}/power`,
+            `${serverUuid}/power`,
+            `${serverIdentifier}/power`
+        ];
+
+        for (const endpoint of endpoints) {
+            try {
+                console.log(`Testing endpoint: /api/client/${endpoint}`);
+
+                // Test with GET first to see if endpoint exists
+                const testUrl = `${PANEL_URL}/api/client/${endpoint}`;
+                const testConfig = {
+                    method: 'GET',
+                    url: testUrl,
+                    headers: {
+                        'Authorization': `Bearer ${CLIENT_API_KEY}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                };
+
+                const response = await axios(testConfig);
+                testResults += `✅ \`${endpoint}\` - Status: ${response.status}\n`;
+            } catch (error) {
+                const status = error.response?.status || 'No Response';
+                const errorMsg = error.response?.data?.errors?.[0]?.detail || error.message;
+                testResults += `❌ \`${endpoint}\` - Status: ${status} - ${errorMsg}\n`;
+            }
+        }
+
+        bot.sendMessage(chatId, testResults, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Test API error:', error);
+        bot.sendMessage(chatId, `❌ Error saat test API: ${error.message}`, getMainMenu());
+    }
 }
 
 // Manage Admins
