@@ -40,11 +40,18 @@ fi
 
 print_info "Direktori bot ditemukan ✓"
 
-# Step 1: Stop existing bot process
+# Step 1: Stop existing bot processes
 echo ""
-print_info "🛑 Menghentikan bot yang sedang berjalan..."
+print_info "🛑 Menghentikan semua bot yang sedang berjalan..."
 
-# Kill bot process by name
+# Stop PM2 processes
+if command -v pm2 &> /dev/null; then
+    print_info "Menghentikan PM2 processes..."
+    pm2 stop all 2>/dev/null
+    pm2 delete all 2>/dev/null
+fi
+
+# Kill bot processes by name
 pkill -f "node.*bot.js" 2>/dev/null
 pkill -f "nodemon.*bot.js" 2>/dev/null
 
@@ -59,7 +66,7 @@ if pgrep -f "node.*bot.js" > /dev/null || pgrep -f "nodemon.*bot.js" > /dev/null
     sleep 1
 fi
 
-print_status "Bot berhasil dihentikan"
+print_status "Semua bot berhasil dihentikan"
 
 # Step 2: Backup current version (optional)
 echo ""
@@ -150,42 +157,38 @@ print_info "🚀 Memulai bot..."
 
 # Check if PM2 is available
 if command -v pm2 &> /dev/null; then
-    print_info "Menggunakan PM2 untuk menjalankan bot..."
-    
-    # Stop existing PM2 process if exists
-    pm2 stop pterodactyl-bot 2>/dev/null
-    pm2 delete pterodactyl-bot 2>/dev/null
-    
-    # Start with PM2
-    pm2 start bot.js --name "pterodactyl-bot" --watch --ignore-watch="node_modules .git *.log"
+    print_info "Menggunakan PM2 untuk menjalankan TelegramME..."
+
+    # Start with PM2 - only TelegramME
+    pm2 start bot.js --name "TelegramME" --watch --ignore-watch="node_modules .git *.log"
     pm2 save
-    
-    print_status "Bot berhasil dijalankan dengan PM2"
-    
+
+    print_status "TelegramME berhasil dijalankan dengan PM2"
+
     # Show PM2 status
     echo ""
     print_info "📊 Status PM2:"
     pm2 list
     
 elif command -v screen &> /dev/null; then
-    print_info "Menggunakan screen untuk menjalankan bot..."
-    
+    print_info "Menggunakan screen untuk menjalankan TelegramME..."
+
     # Kill existing screen session
-    screen -S pterodactyl-bot -X quit 2>/dev/null
-    
+    screen -S TelegramME -X quit 2>/dev/null
+
     # Start in screen
-    screen -dmS pterodactyl-bot node bot.js
-    
-    print_status "Bot berhasil dijalankan dalam screen session 'pterodactyl-bot'"
-    print_info "Gunakan 'screen -r pterodactyl-bot' untuk melihat log"
+    screen -dmS TelegramME node bot.js
+
+    print_status "TelegramME berhasil dijalankan dalam screen session 'TelegramME'"
+    print_info "Gunakan 'screen -r TelegramME' untuk melihat log"
     
 else
-    print_info "Menjalankan bot dengan nohup..."
-    
+    print_info "Menjalankan TelegramME dengan nohup..."
+
     # Start with nohup
     nohup node bot.js > bot.log 2>&1 &
-    
-    print_status "Bot berhasil dijalankan dengan nohup"
+
+    print_status "TelegramME berhasil dijalankan dengan nohup"
     print_info "Log tersimpan di bot.log"
 fi
 
@@ -196,15 +199,15 @@ print_info "🔍 Memverifikasi bot berjalan..."
 sleep 3
 
 if pgrep -f "node.*bot.js" > /dev/null; then
-    print_status "Bot berhasil berjalan!"
-    
+    print_status "TelegramME berhasil berjalan!"
+
     # Show process info
     echo ""
-    print_info "📊 Informasi Proses:"
+    print_info "📊 Informasi Proses TelegramME:"
     ps aux | grep "node.*bot.js" | grep -v grep
-    
+
 else
-    print_error "Bot tidak berjalan! Periksa log untuk error."
+    print_error "TelegramME tidak berjalan! Periksa log untuk error."
     
     # Show recent logs if available
     if [ -f "bot.log" ]; then
@@ -219,19 +222,19 @@ fi
 # Step 9: Show summary
 echo ""
 echo "🎉 ===== UPDATE SELESAI ====="
-print_status "Bot Pterodactyl berhasil diupdate dan dijalankan!"
+print_status "TelegramME berhasil diupdate dan dijalankan!"
 echo ""
 print_info "📋 Ringkasan:"
 echo "   • Update dari GitHub: ✅"
 echo "   • Dependencies: ✅"
 echo "   • Syntax check: ✅"
-echo "   • Bot running: ✅"
+echo "   • TelegramME running: ✅"
 echo ""
 print_info "💡 Tips:"
 echo "   • Gunakan 'ps aux | grep bot' untuk cek status"
 echo "   • Log bot tersimpan di bot.log (jika menggunakan nohup)"
-echo "   • Gunakan 'pm2 logs pterodactyl-bot' untuk melihat log (jika menggunakan PM2)"
-echo "   • Gunakan 'screen -r pterodactyl-bot' untuk melihat log (jika menggunakan screen)"
+echo "   • Gunakan 'pm2 logs TelegramME' untuk melihat log (jika menggunakan PM2)"
+echo "   • Gunakan 'screen -r TelegramME' untuk melihat log (jika menggunakan screen)"
 echo ""
 echo "📅 Selesai pada: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "🚀 ===== PTERODACTYL BOT UPDATE SCRIPT ====="
+echo "🚀 ===== TELEGRAMME UPDATE SCRIPT ====="
