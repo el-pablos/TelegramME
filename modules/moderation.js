@@ -364,6 +364,168 @@ class ModerationModule {
         return value * multipliers[unit];
     }
 
+    async handleWarn(msg, match) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        const reason = match[3] || 'Tidak ada alasan';
+
+        if (msg.chat.type === 'private') {
+            return this.bot.sendMessage(chatId, '❌ Command ini hanya bisa digunakan di grup!');
+        }
+
+        if (!await this.isUserAdmin(chatId, userId)) {
+            return this.bot.sendMessage(chatId, '❌ Hanya admin yang bisa menggunakan command ini!');
+        }
+
+        const targetUser = await this.getTargetUser(msg);
+        if (!targetUser) {
+            return this.bot.sendMessage(chatId, '❌ User tidak ditemukan! Reply pesan user atau mention user.');
+        }
+
+        try {
+            // Add warning to user
+            const userKey = `${chatId}_${targetUser.id}`;
+            const currentWarns = this.warnings.get(userKey) || 0;
+            const newWarns = currentWarns + 1;
+            this.warnings.set(userKey, newWarns);
+
+            const warnText = `⚠️ **PERINGATAN ${newWarns}/3**\n\n` +
+                           `👤 **User:** ${targetUser.first_name}\n` +
+                           `🆔 **ID:** \`${targetUser.id}\`\n` +
+                           `📝 **Alasan:** ${reason}\n` +
+                           `👮 **Admin:** ${msg.from.first_name}`;
+
+            await this.bot.sendMessage(chatId, warnText, { parse_mode: 'Markdown' });
+
+            // Auto-ban after 3 warnings
+            if (newWarns >= 3) {
+                await this.bot.banChatMember(chatId, targetUser.id);
+                this.warnings.delete(userKey);
+                await this.bot.sendMessage(chatId, `🔨 **AUTO-BAN**\n\n${targetUser.first_name} telah di-ban karena mencapai 3 peringatan!`, { parse_mode: 'Markdown' });
+            }
+
+        } catch (error) {
+            console.error('Warn error:', error);
+            this.bot.sendMessage(chatId, '❌ Gagal memberikan peringatan!');
+        }
+    }
+
+    async handleWarns(msg, match) {
+        const chatId = msg.chat.id;
+        const targetUser = await this.getTargetUser(msg);
+
+        if (!targetUser) {
+            return this.bot.sendMessage(chatId, '❌ User tidak ditemukan! Reply pesan user atau mention user.');
+        }
+
+        const userKey = `${chatId}_${targetUser.id}`;
+        const warns = this.warnings.get(userKey) || 0;
+
+        const warnsText = `📊 **PERINGATAN USER**\n\n` +
+                         `👤 **User:** ${targetUser.first_name}\n` +
+                         `🆔 **ID:** \`${targetUser.id}\`\n` +
+                         `⚠️ **Peringatan:** ${warns}/3`;
+
+        this.bot.sendMessage(chatId, warnsText, { parse_mode: 'Markdown' });
+    }
+
+    async handleResetWarn(msg, match) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        if (msg.chat.type === 'private') {
+            return this.bot.sendMessage(chatId, '❌ Command ini hanya bisa digunakan di grup!');
+        }
+
+        if (!await this.isUserAdmin(chatId, userId)) {
+            return this.bot.sendMessage(chatId, '❌ Hanya admin yang bisa menggunakan command ini!');
+        }
+
+        const targetUser = await this.getTargetUser(msg);
+        if (!targetUser) {
+            return this.bot.sendMessage(chatId, '❌ User tidak ditemukan! Reply pesan user atau mention user.');
+        }
+
+        const userKey = `${chatId}_${targetUser.id}`;
+        this.warnings.delete(userKey);
+
+        const resetText = `✅ **PERINGATAN DIRESET**\n\n` +
+                         `👤 **User:** ${targetUser.first_name}\n` +
+                         `🆔 **ID:** \`${targetUser.id}\`\n` +
+                         `👮 **Admin:** ${msg.from.first_name}`;
+
+        this.bot.sendMessage(chatId, resetText, { parse_mode: 'Markdown' });
+    }
+
+    async handlePurge(msg, match) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        if (msg.chat.type === 'private') {
+            return this.bot.sendMessage(chatId, '❌ Command ini hanya bisa digunakan di grup!');
+        }
+
+        if (!await this.isUserAdmin(chatId, userId)) {
+            return this.bot.sendMessage(chatId, '❌ Hanya admin yang bisa menggunakan command ini!');
+        }
+
+        if (!msg.reply_to_message) {
+            return this.bot.sendMessage(chatId, '❌ Reply pesan yang ingin dijadikan titik awal purge!');
+        }
+
+        try {
+            const startMessageId = msg.reply_to_message.message_id;
+            const endMessageId = msg.message_id;
+            let deletedCount = 0;
+
+            // Delete messages from start to current message
+            for (let i = startMessageId; i <= endMessageId; i++) {
+                try {
+                    await this.bot.deleteMessage(chatId, i);
+                    deletedCount++;
+                } catch (error) {
+                    // Message might already be deleted or not exist
+                }
+            }
+
+            const purgeMsg = await this.bot.sendMessage(chatId, `🗑️ **PURGE COMPLETED**\n\nBerhasil menghapus ${deletedCount} pesan!`, { parse_mode: 'Markdown' });
+
+            // Auto-delete purge notification after 5 seconds
+            setTimeout(() => {
+                this.bot.deleteMessage(chatId, purgeMsg.message_id).catch(() => {});
+            }, 5000);
+
+        } catch (error) {
+            console.error('Purge error:', error);
+            this.bot.sendMessage(chatId, '❌ Gagal melakukan purge!');
+        }
+    }
+
+    async handleDelete(msg, match) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        if (msg.chat.type === 'private') {
+            return this.bot.sendMessage(chatId, '❌ Command ini hanya bisa digunakan di grup!');
+        }
+
+        if (!await this.isUserAdmin(chatId, userId)) {
+            return this.bot.sendMessage(chatId, '❌ Hanya admin yang bisa menggunakan command ini!');
+        }
+
+        if (!msg.reply_to_message) {
+            return this.bot.sendMessage(chatId, '❌ Reply pesan yang ingin dihapus!');
+        }
+
+        try {
+            await this.bot.deleteMessage(chatId, msg.reply_to_message.message_id);
+            await this.bot.deleteMessage(chatId, msg.message_id);
+        } catch (error) {
+            console.error('Delete error:', error);
+            this.bot.sendMessage(chatId, '❌ Gagal menghapus pesan!');
+        }
+    }
+
     async isUserAdmin(chatId, userId) {
         try {
             const member = await this.bot.getChatMember(chatId, userId);
