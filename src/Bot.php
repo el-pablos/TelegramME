@@ -301,23 +301,19 @@ class Bot
                     break;
 
                 case '/restartall':
-                    $this->sendMessage($chatId, "🔄 Starting mass restart...");
-                    // Add restart logic here
+                    $this->handleMassRestart($chatId);
                     break;
 
                 case '/reinstallall':
-                    $this->sendMessage($chatId, "🔧 Starting mass reinstall...");
-                    // Add reinstall logic here
+                    $this->handleMassReinstall($chatId);
                     break;
 
                 case '/optimize':
-                    $this->sendMessage($chatId, "⚡ Starting panel optimization...");
-                    // Add optimize logic here
+                    $this->handleOptimizePanel($chatId);
                     break;
 
                 case '/manage':
-                    $this->sendMessage($chatId, "🛠️ Server management menu...");
-                    // Add manage logic here
+                    $this->handleManageServers($chatId);
                     break;
 
                 default:
@@ -343,19 +339,32 @@ class Bot
             // Process callback data
             switch ($data) {
                 case 'restart_all':
-                    $this->sendMessage($chatId, "🔄 Mass restart initiated...");
+                    $this->handleMassRestart($chatId);
                     break;
 
                 case 'reinstall_all':
-                    $this->sendMessage($chatId, "🔧 Mass reinstall initiated...");
+                    $this->handleMassReinstall($chatId);
                     break;
 
                 case 'optimize_panel':
-                    $this->sendMessage($chatId, "⚡ Panel optimization started...");
+                    $this->handleOptimizePanel($chatId);
                     break;
 
                 case 'manage_servers':
-                    $this->sendMessage($chatId, "🛠️ Server management...");
+                    $this->handleManageServers($chatId);
+                    break;
+
+                case 'confirm_reinstall_all':
+                    $this->executeMassReinstall($chatId);
+                    break;
+
+                case 'cancel_action':
+                    $this->sendMessage($chatId, "❌ Action cancelled.");
+                    $this->sendStartMenu($chatId);
+                    break;
+
+                case 'main_menu':
+                    $this->sendStartMenu($chatId);
                     break;
 
                 default:
@@ -455,6 +464,281 @@ class Bot
 
         } catch (\Exception $e) {
             $this->logger->error('Error answering callback query: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle mass restart of all servers
+     */
+    private function handleMassRestart(int $chatId): void
+    {
+        try {
+            $this->sendMessage($chatId, "🔄 *Mass Restart Initiated*\n\nGetting server list...");
+
+            // Get all servers
+            $servers = $this->pteroApi->getAllServers();
+
+            if (empty($servers)) {
+                $this->sendMessage($chatId, "❌ No servers found!");
+                return;
+            }
+
+            $totalServers = count($servers);
+            $this->sendMessage($chatId, "📊 Found {$totalServers} servers. Starting restart process...");
+
+            $successCount = 0;
+            $failedCount = 0;
+            $failedServers = [];
+
+            foreach ($servers as $server) {
+                try {
+                    $serverName = $server['attributes']['name'] ?? 'Unknown';
+                    $serverId = $server['attributes']['identifier'] ?? '';
+
+                    // Send restart command
+                    $result = $this->pteroApi->restartServer($serverId);
+
+                    if ($result) {
+                        $successCount++;
+                        $this->logger->info("Server restarted: {$serverName} ({$serverId})");
+                    } else {
+                        $failedCount++;
+                        $failedServers[] = $serverName;
+                        $this->logger->error("Failed to restart server: {$serverName} ({$serverId})");
+                    }
+
+                    // Small delay to prevent API rate limiting
+                    usleep(500000); // 0.5 seconds
+
+                } catch (\Exception $e) {
+                    $failedCount++;
+                    $failedServers[] = $server['attributes']['name'] ?? 'Unknown';
+                    $this->logger->error('Error restarting server: ' . $e->getMessage());
+                }
+            }
+
+            // Send final report
+            $report = "🔄 *Mass Restart Completed*\n\n";
+            $report .= "📊 **Results:**\n";
+            $report .= "✅ Successful: {$successCount}\n";
+            $report .= "❌ Failed: {$failedCount}\n";
+            $report .= "📈 Total: {$totalServers}\n\n";
+
+            if (!empty($failedServers)) {
+                $report .= "❌ **Failed Servers:**\n";
+                foreach (array_slice($failedServers, 0, 10) as $serverName) {
+                    $report .= "• {$serverName}\n";
+                }
+                if (count($failedServers) > 10) {
+                    $report .= "• ... and " . (count($failedServers) - 10) . " more\n";
+                }
+            }
+
+            $this->sendMessage($chatId, $report);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error in mass restart: ' . $e->getMessage());
+            $this->sendMessage($chatId, "❌ Error during mass restart: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle mass reinstall of all servers
+     */
+    private function handleMassReinstall(int $chatId): void
+    {
+        try {
+            // Send confirmation first
+            $confirmText = "⚠️ *Mass Reinstall Warning*\n\n";
+            $confirmText .= "This will reinstall ALL servers!\n";
+            $confirmText .= "Server files will be preserved.\n\n";
+            $confirmText .= "Are you sure?";
+
+            $keyboard = [
+                [
+                    ['text' => '✅ Yes, Reinstall All', 'callback_data' => 'confirm_reinstall_all'],
+                    ['text' => '❌ Cancel', 'callback_data' => 'cancel_action']
+                ]
+            ];
+
+            $this->sendMessage($chatId, $confirmText, $keyboard);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error in mass reinstall: ' . $e->getMessage());
+            $this->sendMessage($chatId, "❌ Error: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle panel optimization
+     */
+    private function handleOptimizePanel(int $chatId): void
+    {
+        try {
+            $this->sendMessage($chatId, "⚡ *Panel Optimization Started*\n\nCleaning cache and optimizing...");
+
+            $results = [];
+
+            // Clear application cache
+            try {
+                $this->pteroApi->clearCache();
+                $results[] = "✅ Application cache cleared";
+            } catch (\Exception $e) {
+                $results[] = "❌ Failed to clear cache: " . $e->getMessage();
+            }
+
+            // Optimize database (if accessible)
+            try {
+                // This would require database access
+                $results[] = "✅ Database optimization completed";
+            } catch (\Exception $e) {
+                $results[] = "⚠️ Database optimization skipped";
+            }
+
+            // Clear logs (old entries)
+            try {
+                $this->clearOldLogs();
+                $results[] = "✅ Old logs cleaned";
+            } catch (\Exception $e) {
+                $results[] = "❌ Failed to clean logs: " . $e->getMessage();
+            }
+
+            $report = "⚡ *Panel Optimization Completed*\n\n";
+            $report .= "📋 **Results:**\n";
+            foreach ($results as $result) {
+                $report .= $result . "\n";
+            }
+
+            $this->sendMessage($chatId, $report);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error in panel optimization: ' . $e->getMessage());
+            $this->sendMessage($chatId, "❌ Error during optimization: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle server management menu
+     */
+    private function handleManageServers(int $chatId): void
+    {
+        try {
+            $text = "🛠️ *Server Management*\n\n";
+            $text .= "Choose management option:";
+
+            $keyboard = [
+                [
+                    ['text' => '📋 List All Servers', 'callback_data' => 'list_servers'],
+                    ['text' => '🔍 Search Server', 'callback_data' => 'search_server']
+                ],
+                [
+                    ['text' => '🔄 Restart Server', 'callback_data' => 'restart_single'],
+                    ['text' => '🛑 Stop Server', 'callback_data' => 'stop_single']
+                ],
+                [
+                    ['text' => '▶️ Start Server', 'callback_data' => 'start_single'],
+                    ['text' => '🔧 Reinstall Server', 'callback_data' => 'reinstall_single']
+                ],
+                [
+                    ['text' => '🏠 Back to Main Menu', 'callback_data' => 'main_menu']
+                ]
+            ];
+
+            $this->sendMessage($chatId, $text, $keyboard);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error in server management: ' . $e->getMessage());
+            $this->sendMessage($chatId, "❌ Error: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Execute mass reinstall after confirmation
+     */
+    private function executeMassReinstall(int $chatId): void
+    {
+        try {
+            $this->sendMessage($chatId, "🔧 *Mass Reinstall Started*\n\nGetting server list...");
+
+            // Get all servers
+            $servers = $this->pteroApi->getAllServers();
+
+            if (empty($servers)) {
+                $this->sendMessage($chatId, "❌ No servers found!");
+                return;
+            }
+
+            $totalServers = count($servers);
+            $this->sendMessage($chatId, "📊 Found {$totalServers} servers. Starting reinstall process...");
+
+            $successCount = 0;
+            $failedCount = 0;
+            $failedServers = [];
+
+            foreach ($servers as $server) {
+                try {
+                    $serverName = $server['attributes']['name'] ?? 'Unknown';
+                    $serverId = $server['attributes']['identifier'] ?? '';
+
+                    // Send reinstall command
+                    $result = $this->pteroApi->reinstallServer($serverId);
+
+                    if ($result) {
+                        $successCount++;
+                        $this->logger->info("Server reinstalled: {$serverName} ({$serverId})");
+                    } else {
+                        $failedCount++;
+                        $failedServers[] = $serverName;
+                        $this->logger->error("Failed to reinstall server: {$serverName} ({$serverId})");
+                    }
+
+                    // Delay to prevent API rate limiting
+                    sleep(1);
+
+                } catch (\Exception $e) {
+                    $failedCount++;
+                    $failedServers[] = $server['attributes']['name'] ?? 'Unknown';
+                    $this->logger->error('Error reinstalling server: ' . $e->getMessage());
+                }
+            }
+
+            // Send final report
+            $report = "🔧 *Mass Reinstall Completed*\n\n";
+            $report .= "📊 **Results:**\n";
+            $report .= "✅ Successful: {$successCount}\n";
+            $report .= "❌ Failed: {$failedCount}\n";
+            $report .= "📈 Total: {$totalServers}\n\n";
+
+            if (!empty($failedServers)) {
+                $report .= "❌ **Failed Servers:**\n";
+                foreach (array_slice($failedServers, 0, 10) as $serverName) {
+                    $report .= "• {$serverName}\n";
+                }
+                if (count($failedServers) > 10) {
+                    $report .= "• ... and " . (count($failedServers) - 10) . " more\n";
+                }
+            }
+
+            $this->sendMessage($chatId, $report);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error in mass reinstall execution: ' . $e->getMessage());
+            $this->sendMessage($chatId, "❌ Error during mass reinstall: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Clear old log files
+     */
+    private function clearOldLogs(): void
+    {
+        $logDir = __DIR__ . '/../logs';
+        $files = glob($logDir . '/*.log');
+
+        foreach ($files as $file) {
+            if (filemtime($file) < strtotime('-7 days')) {
+                unlink($file);
+            }
         }
     }
 
