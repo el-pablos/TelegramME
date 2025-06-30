@@ -7,6 +7,7 @@ use Longman\TelegramBot\Request;
 use Longman\TelegramBot\Exception\TelegramException;
 use PteroBot\Services\LoggingService;
 use PteroBot\Services\SecurityService;
+use PteroBot\Services\PteroApiService;
 use Dotenv\Dotenv;
 
 /**
@@ -19,6 +20,7 @@ class Bot
     private Telegram $telegram;
     private LoggingService $logger;
     private SecurityService $security;
+    private PteroApiService $pteroApi;
     private string $botToken;
     private string $botUsername;
     private string $ownerTelegramId;
@@ -69,7 +71,8 @@ class Bot
     {
         $this->logger = new LoggingService();
         $this->security = new SecurityService($this->logger);
-        
+        $this->pteroApi = new PteroApiService($this->logger);
+
         $this->logger->info('Bot services initialized');
     }
 

@@ -74,8 +74,24 @@ fi
 print_info "Updating Bot.php with latest MySQL-free version..."
 cp src/Bot.php $BOT_DIR/src/Bot.php
 
-# Fix service file to include .env
+# Fix service file - use script wrapper to load .env
 print_info "Fixing service configuration..."
+
+# Create wrapper script to load .env
+cat > $BOT_DIR/start-bot.sh << EOF
+#!/bin/bash
+cd $BOT_DIR
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+exec php index.php polling
+EOF
+
+chmod +x $BOT_DIR/start-bot.sh
+
+# Create service file that uses wrapper
 cat > /etc/systemd/system/pterodactyl-bot.service << EOF
 [Unit]
 Description=Pterodactyl Telegram Control Bot
@@ -86,14 +102,11 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=$BOT_DIR
-ExecStart=/usr/bin/php $BOT_DIR/index.php polling
+ExecStart=$BOT_DIR/start-bot.sh
 Restart=always
 RestartSec=5
 StartLimitInterval=60s
 StartLimitBurst=3
-
-# Environment file
-EnvironmentFile=$BOT_DIR/.env
 
 [Install]
 WantedBy=multi-user.target
