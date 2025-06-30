@@ -69,12 +69,21 @@ class PteroAPI {
                 }
             };
 
-            if (data) config.data = data;
+            if (data) {
+                config.data = data;
+                console.log(`📤 Sending ${method} to ${endpoint} with data:`, JSON.stringify(data));
+            }
 
             const response = await axios(config);
+            console.log(`📥 Response ${response.status}:`, JSON.stringify(response.data));
             return response.data;
         } catch (error) {
-            console.error('Client API Error:', error.response?.data || error.message);
+            console.error('Client API Error:', {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data,
+                message: error.message
+            });
             throw error;
         }
     }
@@ -89,55 +98,63 @@ class PteroAPI {
         try {
             console.log(`🔄 Attempting restart for server: ${serverIdentifier}`);
 
-            // Method 1: Try Client API endpoints
-            const clientEndpoints = [
-                `servers/${serverIdentifier}/power`,
-                `servers/${serverIdentifier}/power/restart`,
-                `${serverIdentifier}/power`
+            // Based on test results, these endpoints exist but need proper data
+            const restartAttempts = [
+                {
+                    type: 'Client API',
+                    endpoint: `servers/${serverIdentifier}/power`,
+                    method: 'POST',
+                    data: { signal: 'restart' },
+                    api: 'client'
+                },
+                {
+                    type: 'Client API (Stop then Start)',
+                    endpoint: `servers/${serverIdentifier}/power`,
+                    method: 'POST',
+                    data: { signal: 'stop' },
+                    api: 'client',
+                    followUp: { signal: 'start' }
+                },
+                {
+                    type: 'Client API (Kill then Start)',
+                    endpoint: `servers/${serverIdentifier}/power`,
+                    method: 'POST',
+                    data: { signal: 'kill' },
+                    api: 'client',
+                    followUp: { signal: 'start' }
+                }
             ];
 
-            for (const endpoint of clientEndpoints) {
+            for (const attempt of restartAttempts) {
                 try {
-                    console.log(`🔄 Trying Client API: /api/client/${endpoint}`);
-                    await this.clientRequest(endpoint, 'POST', { signal: 'restart' });
-                    console.log(`✅ Success with Client API: ${endpoint}`);
+                    console.log(`🔄 Trying ${attempt.type}: /api/${attempt.api}/${attempt.endpoint}`);
+
+                    if (attempt.api === 'client') {
+                        await this.clientRequest(attempt.endpoint, attempt.method, attempt.data);
+
+                        // If there's a follow-up action (like start after stop)
+                        if (attempt.followUp) {
+                            console.log(`🔄 Follow-up action: ${JSON.stringify(attempt.followUp)}`);
+                            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+                            await this.clientRequest(attempt.endpoint, attempt.method, attempt.followUp);
+                        }
+                    } else {
+                        await this.appRequest(attempt.endpoint, attempt.method, attempt.data);
+                    }
+
+                    console.log(`✅ Success with ${attempt.type}`);
                     return true;
                 } catch (endpointError) {
-                    console.log(`❌ Client API failed ${endpoint}:`, endpointError.response?.status, endpointError.response?.data?.errors?.[0]?.detail || endpointError.message);
+                    const status = endpointError.response?.status;
+                    const errorDetail = endpointError.response?.data?.errors?.[0]?.detail || endpointError.message;
+                    console.log(`❌ ${attempt.type} failed:`, status, errorDetail);
+
+                    // If it's a 422 error, the endpoint is correct but data might be wrong
+                    if (status === 422) {
+                        console.log(`⚠️ Endpoint valid but parameter error for ${attempt.type}`);
+                    }
                     continue;
                 }
-            }
-
-            // Method 2: Try Application API endpoints
-            const appEndpoints = [
-                `servers/${serverIdentifier}/power`,
-                `servers/${serverIdentifier}/startup`,
-                `servers/${serverIdentifier}/suspend`,
-                `servers/${serverIdentifier}/unsuspend`
-            ];
-
-            for (const endpoint of appEndpoints) {
-                try {
-                    console.log(`🔄 Trying Application API: /api/application/${endpoint}`);
-                    await this.appRequest(endpoint, 'POST', { signal: 'restart' });
-                    console.log(`✅ Success with Application API: ${endpoint}`);
-                    return true;
-                } catch (endpointError) {
-                    console.log(`❌ Application API failed ${endpoint}:`, endpointError.response?.status, endpointError.response?.data?.errors?.[0]?.detail || endpointError.message);
-                    continue;
-                }
-            }
-
-            // Method 3: Try direct server management
-            try {
-                console.log(`🔄 Trying server suspend/unsuspend method`);
-                await this.appRequest(`servers/${serverIdentifier}/suspend`, 'POST');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                await this.appRequest(`servers/${serverIdentifier}/unsuspend`, 'POST');
-                console.log(`✅ Success with suspend/unsuspend method`);
-                return true;
-            } catch (suspendError) {
-                console.log(`❌ Suspend/unsuspend failed:`, suspendError.response?.status, suspendError.response?.data?.errors?.[0]?.detail || suspendError.message);
             }
 
             return false;
@@ -336,6 +353,9 @@ bot.on('callback_query', async (query) => {
             break;
         case 'test_api':
             await handleTestAPI(chatId);
+            break;
+        case 'test_restart':
+            await handleTestRestart(chatId);
             break;
         case 'manage_admins':
             await handleManageAdmins(chatId);
@@ -587,7 +607,8 @@ async function handleHealthCheck(chatId) {
         reply_markup: {
             inline_keyboard: [
                 [
-                    { text: '🧪 Test API Endpoints', callback_data: 'test_api' }
+                    { text: '🧪 Test API Endpoints', callback_data: 'test_api' },
+                    { text: '🔄 Test Single Restart', callback_data: 'test_restart' }
                 ],
                 [
                     { text: '🏠 Menu Utama', callback_data: 'main_menu' }
@@ -636,24 +657,34 @@ async function handleTestAPI(chatId) {
             try {
                 console.log(`Testing endpoint: /api/client/${endpoint}`);
 
-                // Test with GET first to see if endpoint exists
+                // Test with actual POST request to power endpoint
                 const testUrl = `${PANEL_URL}/api/client/${endpoint}`;
                 const testConfig = {
-                    method: 'GET',
+                    method: 'POST',
                     url: testUrl,
                     headers: {
                         'Authorization': `Bearer ${CLIENT_API_KEY}`,
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
-                    }
+                    },
+                    data: { signal: 'restart' }
                 };
 
                 const response = await axios(testConfig);
-                testResults += `✅ \`${endpoint}\` - Status: ${response.status}\n`;
+                testResults += `✅ \`${endpoint}\` - Status: ${response.status} - RESTART BERHASIL!\n`;
             } catch (error) {
                 const status = error.response?.status || 'No Response';
                 const errorMsg = error.response?.data?.errors?.[0]?.detail || error.message;
-                testResults += `❌ \`${endpoint}\` - Status: ${status} - ${errorMsg}\n`;
+
+                if (status === 405) {
+                    testResults += `❌ \`${endpoint}\` - Status: ${status} - Method tidak didukung\n`;
+                } else if (status === 404) {
+                    testResults += `❌ \`${endpoint}\` - Status: ${status} - Endpoint tidak ditemukan\n`;
+                } else if (status === 422) {
+                    testResults += `⚠️ \`${endpoint}\` - Status: ${status} - Endpoint valid tapi ada error parameter\n`;
+                } else {
+                    testResults += `❌ \`${endpoint}\` - Status: ${status} - ${errorMsg}\n`;
+                }
             }
         }
 
@@ -662,6 +693,55 @@ async function handleTestAPI(chatId) {
     } catch (error) {
         console.error('Test API error:', error);
         bot.sendMessage(chatId, `❌ Error saat test API: ${error.message}`, getMainMenu());
+    }
+}
+
+// Test Single Server Restart
+async function handleTestRestart(chatId) {
+    try {
+        bot.sendMessage(chatId, '🔄 *Test Single Server Restart*\n\nMengambil server pertama untuk test restart...', { parse_mode: 'Markdown' });
+
+        const servers = await PteroAPI.getAllServers();
+
+        if (servers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server untuk ditest!', getMainMenu());
+        }
+
+        const testServer = servers[0];
+        const serverName = testServer.attributes.name;
+        const serverUuid = testServer.attributes.uuid;
+        const serverIdentifier = testServer.attributes.identifier;
+
+        bot.sendMessage(chatId, `🔄 *Testing Restart*\n\n🖥️ **Server:** ${serverName}\n🔑 **UUID:** ${serverUuid}\n📝 **Identifier:** ${serverIdentifier}\n\nMemulai test restart...`, { parse_mode: 'Markdown' });
+
+        console.log(`🧪 === TEST RESTART START ===`);
+        console.log(`Server: ${serverName}`);
+        console.log(`UUID: ${serverUuid}`);
+        console.log(`Identifier: ${serverIdentifier}`);
+
+        // Test restart with UUID first (most likely to work)
+        const success = await PteroAPI.restartServer(serverUuid);
+
+        let resultText = `🔄 *Test Restart Results*\n\n`;
+        resultText += `🖥️ **Server:** ${serverName}\n`;
+
+        if (success) {
+            resultText += `✅ **Status:** BERHASIL!\n`;
+            resultText += `🎉 **Result:** Server berhasil direstart\n`;
+            resultText += `📝 **Method:** Lihat logs untuk detail method yang berhasil`;
+        } else {
+            resultText += `❌ **Status:** GAGAL\n`;
+            resultText += `📝 **Result:** Semua method restart gagal\n`;
+            resultText += `🔍 **Debug:** Lihat logs untuk detail error`;
+        }
+
+        console.log(`🧪 === TEST RESTART END ===`);
+
+        bot.sendMessage(chatId, resultText, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Test restart error:', error);
+        bot.sendMessage(chatId, `❌ Error saat test restart: ${error.message}`, getMainMenu());
     }
 }
 
