@@ -39,7 +39,7 @@ is_bot_running() {
 
 # Function to start bot
 start_bot() {
-    print_info "🚀 Memulai Pterodactyl Bot..."
+    print_info "🚀 Memulai TelegramME..."
     
     if is_bot_running; then
         print_warning "Bot sudah berjalan!"
@@ -68,20 +68,20 @@ start_bot() {
     # Start bot based on available tools
     if command -v pm2 &> /dev/null; then
         print_info "Menggunakan PM2..."
-        pm2 start bot.js --name "pterodactyl-bot" --watch --ignore-watch="node_modules .git *.log"
+        pm2 start bot.js --name "TelegramME" --watch --ignore-watch="node_modules .git *.log"
         pm2 save
-        print_status "Bot berhasil dijalankan dengan PM2"
-        
+        print_status "TelegramME berhasil dijalankan dengan PM2"
+
     elif command -v screen &> /dev/null; then
         print_info "Menggunakan screen..."
-        screen -dmS pterodactyl-bot node bot.js
-        print_status "Bot berhasil dijalankan dalam screen session 'pterodactyl-bot'"
-        print_info "Gunakan 'screen -r pterodactyl-bot' untuk melihat log"
-        
+        screen -dmS TelegramME node bot.js
+        print_status "TelegramME berhasil dijalankan dalam screen session 'TelegramME'"
+        print_info "Gunakan 'screen -r TelegramME' untuk melihat log"
+
     else
         print_info "Menggunakan nohup..."
         nohup node bot.js > bot.log 2>&1 &
-        print_status "Bot berhasil dijalankan dengan nohup"
+        print_status "TelegramME berhasil dijalankan dengan nohup"
         print_info "Log tersimpan di bot.log"
     fi
     
@@ -97,7 +97,7 @@ start_bot() {
 
 # Function to stop bot
 stop_bot() {
-    print_info "🛑 Menghentikan Pterodactyl Bot..."
+    print_info "🛑 Menghentikan TelegramME..."
     
     if ! is_bot_running; then
         print_warning "Bot tidak sedang berjalan!"
@@ -106,12 +106,12 @@ stop_bot() {
     
     # Stop PM2 if available
     if command -v pm2 &> /dev/null; then
-        pm2 stop pterodactyl-bot 2>/dev/null
-        pm2 delete pterodactyl-bot 2>/dev/null
+        pm2 stop TelegramME 2>/dev/null
+        pm2 delete TelegramME 2>/dev/null
     fi
-    
+
     # Kill screen session if exists
-    screen -S pterodactyl-bot -X quit 2>/dev/null
+    screen -S TelegramME -X quit 2>/dev/null
     
     # Kill bot processes
     pkill -f "node.*bot.js" 2>/dev/null
@@ -136,7 +136,7 @@ stop_bot() {
 
 # Function to restart bot
 restart_bot() {
-    print_info "🔄 Restart Pterodactyl Bot..."
+    print_info "🔄 Restart TelegramME..."
     stop_bot
     sleep 2
     start_bot
@@ -144,7 +144,7 @@ restart_bot() {
 
 # Function to show bot status
 show_status() {
-    echo "📊 ===== STATUS PTERODACTYL BOT ====="
+    echo "📊 ===== STATUS TELEGRAMME ====="
     echo ""
     
     if is_bot_running; then
