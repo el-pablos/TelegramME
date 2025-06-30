@@ -1,597 +1,444 @@
-# 🚀 Pterodactyl Panel Control Bot
+# Pterodactyl Panel Control Bot
 
-<div align="center">
-
-![PHP](https://img.shields.io/badge/PHP-8.1+-777BB4?style=for-the-badge&logo=php&logoColor=white)
-![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)
-![Pterodactyl](https://img.shields.io/badge/Pterodactyl-Panel-0E4B99?style=for-the-badge&logo=pterodactyl&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen?style=for-the-badge)
-
-**Professional Telegram Bot for Mass Pterodactyl Panel Control**
-
-*Manage hundreds of servers with a single command - Restart, Reinstall, Optimize*
-
-[🚀 Quick Start](#-quick-deployment) • [📖 Documentation](#-documentation) • [🔧 Features](#-features) • [💬 Support](#-support)
-
-</div>
+[🇺🇸 English](#english) | [🇮🇩 Bahasa Indonesia](#bahasa-indonesia)
 
 ---
 
-## ✨ Overview
+## English
 
-**Pterodactyl Panel Control Bot** adalah solusi profesional untuk mengelola ratusan server Pterodactyl Panel melalui Telegram. Bot ini memungkinkan restart massal, reinstall tanpa kehilangan data, optimasi panel, dan monitoring real-time dengan UI/UX yang elegan.
+A comprehensive Telegram bot for managing Pterodactyl Panel servers with advanced features including user management, server automation, and Rose Bot integration.
 
-### 🎯 **Perfect For**
-- 🏢 **Hosting Providers** - Kelola ratusan server pelanggan
-- 🎮 **Gaming Networks** - Restart semua game server sekaligus
-- 🔧 **System Administrators** - Maintenance massal yang efisien
-- 📊 **Panel Managers** - Monitoring dan optimasi terpusat
+### 🌟 Features
 
-## 🚀 Features
+#### Core Panel Management
+- **Server Control**: Restart, reinstall, and manage all servers
+- **User Management**: Create users, manage permissions, and track server ownership
+- **Panel Optimization**: Automated performance optimization and health monitoring
+- **Admin Tools**: Comprehensive admin panel with user statistics
 
-### 🔥 **Core Operations**
-- **🔄 Mass Restart** - Restart semua server secara paralel dengan progress tracking
-- **🔧 Mass Reinstall** - Reinstall tanpa menghapus konfigurasi (data aman)
-- **⚡ Panel Optimization** - Optimasi database, cache, logs untuk performa maksimal
-- **🛠️ Individual Control** - Kelola server satuan dengan kontrol penuh
-- **🔍 Smart Search** - Cari server berdasarkan nama atau ID
+#### Rose Bot Integration 🌹
+- **FBAN System**: Federation ban management with Rose Bot database
+- **Federation Management**: Join/leave federations, view federation info
+- **User Status Checking**: Check FBAN status and federation membership
+- **Telegram ID Cards**: Beautiful ASCII card display for user information
 
-### 🛡️ **Security & Reliability**
-- **� Owner-Only Access** - Kontrol akses ketat untuk keamanan
-- **🛡️ Rate Limiting** - Perlindungan anti-spam dan abuse
-- **✅ Input Validation** - Validasi ketat semua input user
-- **📊 Operation Tracking** - Monitor operasi concurrent real-time
-- **📝 Comprehensive Logging** - Audit trail lengkap semua aktivitas
+#### Advanced Features
+- **Health Monitoring**: Real-time panel and server health checks
+- **Automated Installation**: One-click server creation with auto-installation
+- **Logging System**: Comprehensive logging with rotation
+- **Update System**: Automated git-based updates with rollback support
 
-### 📱 **Professional UI/UX**
-- **⌨️ Inline Keyboard** - Navigasi intuitif dengan menu terstruktur
-- **✔️❌ Smart Confirmations** - Dialog konfirmasi untuk operasi kritis
-- **⏳ Live Progress** - Update progress real-time dengan loading indicators
-- **🎨 Status Indicators** - Visual status dengan icon dan warna
-- **📊 Rich Notifications** - Notifikasi detail dengan statistik
+### 🚀 Quick Start
 
-### � **Monitoring & Analytics**
-- **🏥 Health Monitoring** - Real-time system health checks
-- **📈 Usage Statistics** - Detailed analytics dan performance metrics
-- **🔔 Smart Notifications** - Alert otomatis untuk owner
-- **📋 Activity Logs** - Complete audit trail dengan SQLite database
-- **🔄 Auto Recovery** - Backup dan restore otomatis
+#### Prerequisites
+- Ubuntu/Debian VPS with root access
+- Node.js 16+ and npm
+- Pterodactyl Panel installation
+- Telegram Bot Token
 
----
+#### Installation
 
-## 🚀 Quick Deployment
-
-### ⚡ **One-Command Setup** (Ubuntu VPS)
-
-#### 🔑 **Root User Setup** (Recommended for VPS)
+1. **Clone Repository**
 ```bash
-# Download & Extract
-wget https://github.com/el-pablos/ptero-panel-control/archive/main.zip
-unzip main.zip && cd ptero-panel-control-main/
-
-# Root Setup (3 minutes) - Perfect for VPS
-chmod +x root-setup.sh
-./root-setup.sh
-
-# 🎯 Smart Features:
-# ✅ Auto-detects existing .env configuration
-# ✅ Auto-detects PHP version (8.1, 8.2, 8.3)
-# ✅ Skips configured settings
-# ✅ No permission issues
+git clone https://github.com/el-pablos/TelegramME.git
+cd TelegramME
 ```
 
-#### 👤 **Regular User Setup**
+2. **Run Installation Script**
 ```bash
-# Download & Extract
-wget https://github.com/el-pablos/ptero-panel-control/archive/main.zip
-unzip main.zip && cd ptero-panel-control-main/
-
-# Quick Setup (5 minutes)
-chmod +x quick-setup.sh
-./quick-setup.sh
-```
-
-**Script akan menanyakan:**
-- 🤖 Bot Token
-- 👤 Your Telegram ID
-- 🌐 Pterodactyl Panel URL
-- 🔑 Application API Key
-- 🔑 Client API Key
-
-### 🔧 **Advanced Installation**
-
-```bash
-# Clone repository
-git clone https://github.com/el-pablos/ptero-panel-control.git
-cd ptero-panel-control/
-
-# Advanced setup with SSL, multiple domains, etc.
 chmod +x install.sh
-./install.sh
+sudo ./install.sh
 ```
 
-### 📋 **Requirements**
+3. **Configure Environment**
+```bash
+# Edit .env file with your credentials
+nano .env
+```
 
-- **OS**: Ubuntu 20.04+ (auto-detected)
-- **PHP**: 8.1+ with extensions (auto-installed, supports 8.3)
-- **User**: Root or regular user with sudo (both supported)
-- **Database**: SQLite (auto-setup)
-- **Dependencies**: Composer, Git, Curl (auto-installed)
+4. **Start Bot**
+```bash
+# Using systemd (recommended)
+sudo systemctl start panel-control
+sudo systemctl enable panel-control
 
-Edit file `.env` dengan konfigurasi Anda:
+# Or manual start
+node bot.js
+```
 
-```env
+### ⚙️ Configuration
+
+#### Environment Variables (.env)
+```bash
 # Telegram Bot Configuration
-BOT_TOKEN=your_bot_token_here
-BOT_USERNAME=your_bot_username
-OWNER_TELEGRAM_ID=your_telegram_id
+BOT_TOKEN=your_telegram_bot_token
+OWNER_ID=your_telegram_user_id
 
 # Pterodactyl Panel Configuration
-PTERODACTYL_PANEL_URL=https://your-panel-domain.com
-PTERODACTYL_APPLICATION_API_KEY=ptla_your_application_api_key
-PTERODACTYL_CLIENT_API_KEY=ptlc_your_client_api_key
+PANEL_URL=https://your-panel.com
+PANEL_API_KEY=your_panel_api_key
 
-# Security Configuration
-ALLOWED_USERS=your_telegram_id
-MAX_CONCURRENT_OPERATIONS=10
-OPERATION_TIMEOUT=300
+# Rose Bot Integration (Optional)
+ROSE_API_KEY=your_rose_api_key
+FEDERATION_ID=your_default_federation_id
+
+# Database Configuration
+DB_PATH=./logs/bot.db
 
 # Logging Configuration
-LOG_LEVEL=INFO
-LOG_FILE=logs/bot.log
-LOG_MAX_FILES=7
-
-# Bot Configuration
-DEBUG_MODE=false
+LOG_LEVEL=info
+LOG_MAX_SIZE=10m
+LOG_MAX_FILES=5
 ```
 
----
+#### Rose Bot Setup
+1. Chat with @MissRose_bot on Telegram
+2. Use `/token` command to get your API key
+3. Add the key to your `.env` file
+4. Restart the bot to enable Rose features
 
-## 📖 Documentation
+### 📱 Commands
 
-### 📱 **Telegram Commands**
+#### Basic Commands
+- `/start` - Start the bot and show main menu
+- `/help` - Show help information
+- `/info` - Show your Telegram ID card
+- `/info` (reply) - Show replied user's information
 
-| Command | Description | Features |
-|---------|-------------|----------|
-| `/start` | 🏠 Main dashboard | Interactive menu dengan inline keyboard |
-| `/restartall` | 🔄 Mass restart | Parallel restart dengan progress tracking |
-| `/reinstallall` | � Safe reinstall | Reinstall tanpa hapus config/data |
-| `/optimize` | ⚡ Panel optimization | Cache, database, logs cleanup |
-| `/manage` | 🛠️ Individual control | Single server management |
+#### Rose Bot Commands
+- `/fban [user_id] [reason]` - Federation ban user
+- `/fban [reason]` (reply) - FBAN replied user
+- `/unfban [user_id]` - Remove federation ban
+- `/unfban` (reply) - UNFBAN replied user
+- `/joinfed [fed_id]` - Join a federation
+- `/leavefed [fed_id]` - Leave a federation
+- `/fedinfo` - Show federation information
 
-### 🔗 **CLI Commands**
+#### Admin Commands (Owner Only)
+- **Server Management**: Restart/reinstall all servers
+- **User Management**: Create users, manage permissions
+- **Panel Optimization**: Performance tuning and monitoring
+- **Health Checks**: System diagnostics and status
 
-| Command | Description |
-|---------|-------------|
-| `php index.php polling` | 🔄 Start bot in polling mode |
-| `php index.php health` | 🏥 System health check |
-| `php index.php stats` | 📊 Usage statistics |
-| `php index.php cleanup` | 🧹 Cleanup old data |
+### 🔧 Management
 
-### ⚙️ **Smart Features**
-
-- **🔍 Auto Package Detection** - Skip installed packages
-- **💾 Auto Backup** - Backup before updates
-- ** Real-time Monitoring** - Health checks & alerts
-- **🔄 Auto Recovery** - Rollback on failures
-- **🛠️ Service Management** - Systemd & Supervisor integration
-- **📝 Comprehensive Logging** - SQLite database & file logs
-- **🔑 Root User Support** - Perfect for VPS deployment
-- **🐘 PHP 8.3 Support** - Latest PHP version compatibility
-- **🧠 Smart .env Detection** - Auto-detect existing configuration
-- **📦 Smart Package Detection** - Auto-detect PHP version & packages
-
----
-
----
-
-## 🔑 Root User Deployment
-
-### 🚀 **Perfect for VPS**
-
-Running as root eliminates permission issues and simplifies VPS deployment:
-
+#### Update Bot
 ```bash
-# As root user
-sudo su -
-cd /root
-git clone https://github.com/el-pablos/ptero-panel-control.git
-cd ptero-panel-control/
-./root-setup.sh
+# Automated update
+./update.sh
+
+# Manual update
+git pull origin main
+sudo systemctl restart panel-control
 ```
 
-### ✅ **Root Benefits**
-
-- **🔧 No Permission Issues** - Full system access
-- **📁 Simple File Management** - All files in `/root/pterodactyl-bot/`
-- **🛠️ Easy Service Management** - Direct systemctl access
-- **🔒 Secure VPS Setup** - Perfect for dedicated servers
-- **⚡ Faster Installation** - No sudo overhead
-
-### 🔧 **Root Commands**
-
+#### Monitor Bot
 ```bash
-# Service management
-systemctl status pterodactyl-bot
-systemctl restart pterodactyl-bot
-journalctl -u pterodactyl-bot -f
-
-# Bot management
-cd /root/pterodactyl-bot
-php index.php health
-php index.php stats
-php deploy.php cleanup
-```
-
----
-
-## 🛠️ Management Commands
-
-### 🔧 **Deployment**
-
-```bash
-# Health check
-php deploy.php health
-
-# View statistics
-php deploy.php stats
-
-# Cleanup old data
-php deploy.php cleanup
-```
-
-### 🔄 **Service Management**
-
-```bash
-# Service status
-sudo systemctl status pterodactyl-bot
-
-# Restart service
-sudo systemctl restart pterodactyl-bot
+# Check status
+sudo systemctl status panel-control
 
 # View logs
-sudo journalctl -u pterodactyl-bot -f
-
-# Update bot
-./update.sh
-```
-
----
-
-## 📊 Monitoring & Analytics
-
-### 🏥 **Health Monitoring**
-
-```bash
-# System health check
-curl "https://your-domain.com/?mode=health"
-
-# Response example
-{
-  "status": "ok",
-  "timestamp": "2025-06-30 04:18:53",
-  "checks": {
-    "telegram_api": "ok",
-    "database": "ok",
-    "pterodactyl_api": "ok"
-  }
-}
-```
-
-### � **Usage Statistics**
-
-```bash
-# Bot statistics
-php deploy.php stats
-
-# View activity logs
-tail -f logs/bot.log
-
-# Database queries
-sqlite3 logs/bot.db "SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT 10;"
-```
-
-### 🔔 **Alerts & Notifications**
-
-- **Real-time Alerts** - Owner notifications untuk critical events
-- **Operation Reports** - Detailed reports untuk mass operations
-- **Error Tracking** - Automatic error detection dan reporting
-- **Performance Metrics** - Response time dan success rate monitoring
-
----
-
-## 🛡️ Security & Best Practices
-
-### 🔒 **Security Features**
-
-- **🔐 Owner-Only Access** - Strict access control
-- **🛡️ Rate Limiting** - Anti-spam protection
-- **✅ Input Validation** - Comprehensive input sanitization
-- **📝 Audit Logging** - Complete activity tracking
-- **🔄 Auto Recovery** - Backup dan rollback capabilities
-
-### � **Security Checklist**
-
-- [ ] Change default credentials
-- [ ] Enable HTTPS dengan SSL certificate
-- [ ] Configure firewall rules
-- [ ] Set strong webhook secret token
-- [ ] Regular security updates
-- [ ] Monitor access logs
-- [ ] Backup configuration files
-
-### 🔧 **Production Deployment**
-
-```bash
-# Firewall setup
-sudo ufw allow 22/tcp
-sudo ufw enable
-
-# Service monitoring
-sudo systemctl enable pterodactyl-bot
-sudo systemctl start pterodactyl-bot
-```
-
----
-
-## � Troubleshooting
-
-### 🔧 **Common Issues**
-
-<details>
-<summary><strong>🐘 PHP 8.3 Package Error (FIXED!)</strong></summary>
-
-```bash
-# ❌ Old error: Package 'php8.3-json' has no installation candidate
-# ✅ FIXED: JSON is built-in since PHP 8.0
-
-# Script now auto-detects PHP version and skips json package for PHP 8.3+
-# No manual intervention needed!
-
-# Test PHP detection:
-./test-php-packages.sh
-```
-</details>
-
-<details>
-<summary><strong>🧠 .env Auto-Detection</strong></summary>
-
-```bash
-# ✅ Script now auto-detects existing .env configuration
-# If .env exists with all required fields, script will ask:
-# "Use existing configuration? (y/n)"
-
-# To force new configuration:
-rm .env
-./root-setup.sh
-
-# Test .env detection:
-./test-env-detection.sh
-```
-</details>
-
-<details>
-<summary><strong>🔑 Root vs Regular User</strong></summary>
-
-```bash
-# For root user (recommended for VPS):
-./root-setup.sh
-# Files in: /root/pterodactyl-bot/
-# User: root
-# No permission issues!
-
-# For regular user:
-./quick-setup.sh
-# Files in: /var/www/pterodactyl-bot/
-# User: www-data
-# Requires sudo for some operations
-```
-</details>
-
-<details>
-<summary><strong>🤖 Bot tidak merespon</strong></summary>
-
-```bash
-# Check webhook status
-php deploy.php webhook-info
-
-# Check service status
-sudo systemctl status pterodactyl-bot
-
-# View recent logs
-tail -f logs/bot.log
-
-# Test bot manually
-php test.php
-```
-</details>
-
-<details>
-<summary><strong>� API Connection Error</strong></summary>
-
-```bash
-# Test Pterodactyl API
-curl -H "Authorization: Bearer YOUR_API_KEY" \
-     -H "Accept: application/json" \
-     https://panel.yourdomain.com/api/client
-
-# Check API permissions
-# Verify panel URL accessibility
-# Check firewall rules
-```
-</details>
-
-<details>
-<summary><strong>🗄️ Database Issues</strong></summary>
-
-```bash
-# Check database permissions
-ls -la logs/bot.db
-
-# Test database connection
-sqlite3 logs/bot.db ".tables"
-
-# Fix permissions
-chmod 777 logs/
-chmod 666 logs/bot.db
-```
-</details>
-
-### 🔍 **Debug Mode**
-
-```env
-# Enable in .env
-DEBUG_MODE=true
-LOG_LEVEL=DEBUG
-
-# View debug logs
-tail -f logs/bot.log | grep DEBUG
-```
-
----
-
-## � Performance & Scaling
-
-### ⚡ **Optimization Tips**
-
-- **🔄 Use Webhook Mode** untuk production (lebih efisien)
-- **📊 Monitor Resource Usage** dengan `htop` dan `iotop`
-- **🗄️ Regular Database Cleanup** dengan cron jobs
-- **📝 Log Rotation** untuk mencegah disk penuh
-- **🔧 Nginx Caching** untuk static assets
-
-### 📈 **Scaling Considerations**
-
-- **Load Balancing** untuk multiple bot instances
-- **Database Optimization** untuk high-traffic scenarios
-- **CDN Integration** untuk global deployment
-- **Monitoring Stack** dengan Prometheus + Grafana
-
----
-
-## 📝 Development & Contributing
-
-### 🏗️ **Project Architecture**
-
-```
-ptero-panel-control/
-├── 🤖 src/
-│   ├── Commands/          # Telegram bot commands
-│   │   ├── BaseCommand.php
-│   │   ├── StartCommand.php
-│   │   ├── RestartAllCommand.php
-│   │   └── ...
-│   ├── Services/          # Business logic services
-│   │   ├── PteroApiService.php
-│   │   ├── LoggingService.php
-│   │   └── SecurityService.php
-│   └── Bot.php           # Main bot controller
-├── 🔧 Setup Scripts/
-│   ├── install.sh        # Advanced installation
-│   ├── quick-setup.sh    # Quick deployment
-│   ├── update.sh         # Update script
-│   └── deploy.php        # Deployment utilities
-├── ⚙️ Config Files/
-│   ├── nginx.conf        # Web server config
-│   ├── supervisor.conf   # Process manager
-│   └── systemd.service   # System service
-├── 📊 logs/              # Logs & database
-├── 📖 docs/              # Documentation
-└── 🔧 index.php          # Entry point
-```
-
-### 🛠️ **Development Setup**
-
-```bash
-# Clone repository
-git clone https://github.com/el-pablos/ptero-panel-control.git
-cd ptero-panel-control/
-
-# Install dependencies
-composer install
-
-# Setup environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# Run tests
-php test.php
-
-# Start development server
-php deploy.php polling
-```
-
-### 🧪 **Testing**
-
-```bash
-# Run all tests
-php test.php
+sudo journalctl -u panel-control -f
 
 # Health check
-php deploy.php health
-
-# Manual testing
-php index.php?mode=polling
+node health.js
 ```
 
-### 🤝 **Contributing**
-
-1. **Fork** the repository
-2. **Create** feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to branch (`git push origin feature/amazing-feature`)
-5. **Open** Pull Request
-
----
-
-## 📞 Support & Community
-
-<div align="center">
-
-### 💬 **Get Help**
-
-[![Telegram](https://img.shields.io/badge/Telegram-@ImTamaa-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/ImTamaa)
-[![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/el-pablos/ptero-panel-control/issues)
-[![Email](https://img.shields.io/badge/Email-Support-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:yeteprem.end23juni@gmail.com)
-
-### 🌟 **Show Your Support**
-
-If this project helped you, please consider giving it a ⭐ on GitHub!
-
-</div>
+### 📊 Telegram ID Card Display
+```
+╭─────────────────────────────────╮
+│        🆔 TELEGRAM ID CARD       │
+├─────────────────────────────────┤
+│                                 │
+│  👤 Name:      Pablos           │
+│  🆔 User ID:   5476148500       │
+│  📱 Username:  @ImTamaa         │
+│  🌐 DC ID:     2                │
+│  💎 Premium:   No               │
+│                                 │
+╰─────────────────────────────────╯
+```
 
 ---
 
-## 📄 License & Credits
+## Bahasa Indonesia
 
-### 📜 **License**
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+Bot Telegram komprehensif untuk mengelola server Pterodactyl Panel dengan fitur canggih termasuk manajemen pengguna, otomasi server, dan integrasi Rose Bot.
 
-### 👨‍💻 **Author**
-**Pablos** ([@ImTamaa](https://t.me/ImTamaa))
-- 🌐 GitHub: [@el-pablos](https://github.com/el-pablos)
-- 📧 Email: yeteprem.end23juni@gmail.com
+### 🌟 Fitur
 
-### 🙏 **Acknowledgments**
-- [Pterodactyl Panel](https://pterodactyl.io/) - Amazing game server management panel
-- [Telegram Bot API](https://core.telegram.org/bots/api) - Powerful bot platform
-- [PHP Telegram Bot Library](https://github.com/php-telegram-bot/core) - Excellent PHP library
+#### Manajemen Panel Inti
+- **Kontrol Server**: Restart, reinstall, dan kelola semua server
+- **Manajemen User**: Buat user, kelola permission, dan lacak kepemilikan server
+- **Optimasi Panel**: Optimasi performa otomatis dan monitoring kesehatan
+- **Tools Admin**: Panel admin komprehensif dengan statistik user
+
+#### Integrasi Rose Bot 🌹
+- **Sistem FBAN**: Manajemen federation ban dengan database Rose Bot
+- **Manajemen Federasi**: Join/leave federasi, lihat info federasi
+- **Pengecekan Status User**: Cek status FBAN dan keanggotaan federasi
+- **Kartu ID Telegram**: Tampilan kartu ASCII yang indah untuk informasi user
+
+#### Fitur Lanjutan
+- **Monitoring Kesehatan**: Pengecekan kesehatan panel dan server real-time
+- **Instalasi Otomatis**: Pembuatan server satu klik dengan auto-instalasi
+- **Sistem Logging**: Logging komprehensif dengan rotasi
+- **Sistem Update**: Update otomatis berbasis git dengan dukungan rollback
+
+### 🚀 Mulai Cepat
+
+#### Prasyarat
+- VPS Ubuntu/Debian dengan akses root
+- Node.js 16+ dan npm
+- Instalasi Pterodactyl Panel
+- Token Bot Telegram
+
+#### Instalasi
+
+1. **Clone Repository**
+```bash
+git clone https://github.com/el-pablos/TelegramME.git
+cd TelegramME
+```
+
+2. **Jalankan Script Instalasi**
+```bash
+chmod +x install.sh
+sudo ./install.sh
+```
+
+3. **Konfigurasi Environment**
+```bash
+# Edit file .env dengan kredensial Anda
+nano .env
+```
+
+4. **Mulai Bot**
+```bash
+# Menggunakan systemd (direkomendasikan)
+sudo systemctl start panel-control
+sudo systemctl enable panel-control
+
+# Atau start manual
+node bot.js
+```
+
+### ⚙️ Konfigurasi
+
+#### Variabel Environment (.env)
+```bash
+# Konfigurasi Bot Telegram
+BOT_TOKEN=token_bot_telegram_anda
+OWNER_ID=id_telegram_user_anda
+
+# Konfigurasi Pterodactyl Panel
+PANEL_URL=https://panel-anda.com
+PANEL_API_KEY=api_key_panel_anda
+
+# Integrasi Rose Bot (Opsional)
+ROSE_API_KEY=api_key_rose_anda
+FEDERATION_ID=id_federasi_default_anda
+
+# Konfigurasi Database
+DB_PATH=./logs/bot.db
+
+# Konfigurasi Logging
+LOG_LEVEL=info
+LOG_MAX_SIZE=10m
+LOG_MAX_FILES=5
+```
+
+#### Setup Rose Bot
+1. Chat dengan @MissRose_bot di Telegram
+2. Gunakan command `/token` untuk mendapatkan API key
+3. Tambahkan key ke file `.env` Anda
+4. Restart bot untuk mengaktifkan fitur Rose
+
+### 📱 Commands
+
+#### Command Dasar
+- `/start` - Mulai bot dan tampilkan menu utama
+- `/help` - Tampilkan informasi bantuan
+- `/info` - Tampilkan kartu ID Telegram Anda
+- `/info` (reply) - Tampilkan informasi user yang di-reply
+
+#### Command Rose Bot
+- `/fban [user_id] [alasan]` - Federation ban user
+- `/fban [alasan]` (reply) - FBAN user yang di-reply
+- `/unfban [user_id]` - Hapus federation ban
+- `/unfban` (reply) - UNFBAN user yang di-reply
+- `/joinfed [fed_id]` - Bergabung dengan federasi
+- `/leavefed [fed_id]` - Keluar dari federasi
+- `/fedinfo` - Tampilkan informasi federasi
+
+#### Command Admin (Khusus Owner)
+- **Manajemen Server**: Restart/reinstall semua server
+- **Manajemen User**: Buat user, kelola permission
+- **Optimasi Panel**: Tuning performa dan monitoring
+- **Health Check**: Diagnostik sistem dan status
+
+### 🔧 Manajemen
+
+#### Update Bot
+```bash
+# Update otomatis
+./update.sh
+
+# Update manual
+git pull origin main
+sudo systemctl restart panel-control
+```
+
+#### Monitor Bot
+```bash
+# Cek status
+sudo systemctl status panel-control
+
+# Lihat logs
+sudo journalctl -u panel-control -f
+
+# Health check
+node health.js
+```
+
+### 📊 Tampilan Kartu ID Telegram
+```
+╭─────────────────────────────────╮
+│        🆔 TELEGRAM ID CARD       │
+├─────────────────────────────────┤
+│                                 │
+│  👤 Nama:      Pablos           │
+│  🆔 User ID:   5476148500       │
+│  📱 Username:  @ImTamaa         │
+│  🌐 DC ID:     2                │
+│  💎 Premium:   Tidak            │
+│                                 │
+╰─────────────────────────────────╯
+```
 
 ---
 
-<div align="center">
+## 🤝 Contributing
 
-### ⚠️ **Important Disclaimer**
+1. Fork repository
+2. Buat feature branch
+3. Buat perubahan Anda
+4. Test secara menyeluruh
+5. Submit pull request
 
-**This bot can cause server downtime during mass operations.**
-Always backup important data before performing mass restart/reinstall operations.
-Use at your own risk and test thoroughly in development environment first.
+## 📄 License
+
+Proyek ini dilisensikan di bawah MIT License - lihat file [LICENSE](LICENSE) untuk detail.
+
+## 👨‍💻 Author
+
+**Pablos (@ImTamaa)**
+- GitHub: [@el-pablos](https://github.com/el-pablos)
+- Telegram: [@ImTamaa](https://t.me/ImTamaa)
+
+### 🛡️ Fitur Keamanan
+
+- **Akses Khusus Owner**: Bot terbatas untuk owner yang dikonfigurasi
+- **Proteksi API Key**: Penyimpanan aman kredensial sensitif
+- **Validasi Input**: Proteksi terhadap input berbahaya
+- **Rate Limiting**: Mencegah spam dan penyalahgunaan
+- **Logging Aman**: Data sensitif dikecualikan dari logs
+
+### 🔄 Sistem Update
+
+Bot menyertakan sistem update otomatis:
+- **Integrasi Git**: Pull perubahan terbaru dari repository
+- **Manajemen Dependency**: Update paket npm otomatis
+- **Manajemen Service**: Restart mulus tanpa downtime
+- **Sistem Backup**: Backup otomatis sebelum update
+- **Verifikasi Kesehatan**: Health check setelah update
+
+### 📝 Logging
+
+Sistem logging komprehensif dengan:
+- **Structured Logging**: Format JSON dengan timestamp
+- **Log Rotation**: Rotasi file otomatis dan cleanup
+- **Multiple Levels**: Level debug, info, warn, error
+- **Performance Metrics**: Response time dan statistik penggunaan
+
+### 🔧 Troubleshooting
+
+#### Masalah Umum
+
+**Bot tidak merespons:**
+```bash
+# Cek status service
+sudo systemctl status panel-control
+
+# Cek logs
+sudo journalctl -u panel-control -n 50
+
+# Test manual
+cd /path/to/bot && node bot.js
+```
+
+**Error 401 Unauthorized:**
+```bash
+# Update bot token di .env
+nano .env
+
+# Restart service
+sudo systemctl restart panel-control
+```
+
+**Panel API Error:**
+```bash
+# Test koneksi panel
+curl -H "Authorization: Bearer YOUR_API_KEY" https://your-panel.com/api/client
+
+# Cek konfigurasi
+node health.js
+```
+
+#### Health Check
+
+Bot menyediakan health check komprehensif:
+```bash
+# Jalankan health check
+node health.js
+
+# Output akan menampilkan:
+# ✅ Bot Token: Valid
+# ✅ Panel Connection: OK
+# ✅ Database: Connected
+# ✅ Rose API: Available
+# ✅ Permissions: Correct
+```
+
+### 📈 Performance Tips
+
+1. **Optimasi Database**: Jalankan optimasi panel secara berkala
+2. **Monitor Resources**: Pantau penggunaan CPU dan RAM
+3. **Log Rotation**: Pastikan log rotation aktif
+4. **Update Regular**: Selalu gunakan versi terbaru
+5. **Backup Strategy**: Backup konfigurasi secara berkala
+
+### 🚀 Advanced Usage
+
+#### Custom Scripts
+Bot mendukung eksekusi script custom untuk otomasi lanjutan:
+```bash
+# Tambahkan script ke direktori scripts/
+mkdir scripts
+echo '#!/bin/bash\necho "Custom script executed"' > scripts/custom.sh
+chmod +x scripts/custom.sh
+```
+
+#### API Integration
+Integrasikan dengan sistem eksternal melalui webhook:
+```javascript
+// Contoh webhook handler
+app.post('/webhook', (req, res) => {
+    // Handle external triggers
+    bot.sendMessage(OWNER_ID, 'External event triggered');
+});
+```
 
 ---
 
-**Made with ❤️ for the Pterodactyl community**
-
-*Happy Server Management! 🚀*
-
-</div>
+**⚡ Siap mengelola Pterodactyl Panel Anda seperti seorang pro? Mulai sekarang!**
