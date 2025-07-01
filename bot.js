@@ -306,6 +306,9 @@ function getMainMenu() {
                     { text: '🔑 Auto Creds.json', callback_data: 'auto_creds_json' }
                 ],
                 [
+                    { text: '🗑️ Delete Session Folder', callback_data: 'delete_session_folder' }
+                ],
+                [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
                     { text: '🏥 Cek Kesehatan', callback_data: 'health_check' }
                 ],
@@ -795,6 +798,9 @@ bot.on('callback_query', async (query) => {
         case 'auto_creds_json':
             await handleAutoCredsJson(chatId);
             break;
+        case 'delete_session_folder':
+            await handleDeleteSessionFolder(chatId);
+            break;
         case 'server_stats':
             await handleServerStats(chatId);
             break;
@@ -854,6 +860,16 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             if (data.startsWith('session_user_')) {
                 const userId = data.replace('session_user_', '');
                 await handleSessionFolderForUser(chatId, userId);
+            }
+            // Handle delete_user_ callbacks
+            else if (data.startsWith('delete_user_')) {
+                const userId = data.replace('delete_user_', '');
+                await handleDeleteSessionForUser(chatId, userId);
+            }
+            // Handle confirm_delete_ callbacks
+            else if (data.startsWith('confirm_delete_')) {
+                const userId = data.replace('confirm_delete_', '');
+                await executeDeleteSessionForUser(chatId, userId);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
@@ -2027,6 +2043,164 @@ async function processCredsJsonInput(chatId, credsContent) {
     } catch (error) {
         console.error('Process creds.json input error:', error);
         bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${error.message}`, getMainMenu());
+    }
+}
+
+// Delete Session Folder Management
+async function handleDeleteSessionFolder(chatId) {
+    try {
+        bot.sendMessage(chatId, '🗑️ *Delete Session Folder*\n\nMengambil daftar user...', { parse_mode: 'Markdown' });
+
+        // Get all users first
+        const users = await PteroAPI.getAllUsers();
+
+        if (users.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada user ditemukan!', getMainMenu());
+        }
+
+        // Create user selection keyboard
+        const userButtons = [];
+        for (let i = 0; i < users.length; i += 2) {
+            const row = [];
+            const user1 = users[i];
+            row.push({ text: `👤 ${user1.attributes.username}`, callback_data: `delete_user_${user1.attributes.id}` });
+
+            if (users[i + 1]) {
+                const user2 = users[i + 1];
+                row.push({ text: `👤 ${user2.attributes.username}`, callback_data: `delete_user_${user2.attributes.id}` });
+            }
+            userButtons.push(row);
+        }
+
+        userButtons.push([{ text: '🏠 Menu Utama', callback_data: 'main_menu' }]);
+
+        const text = `🗑️ *Pilih User untuk Delete Session Folder*\n\n` +
+                    `👥 Total User: ${users.length}\n\n` +
+                    `⚠️ **PERINGATAN:** Ini akan menghapus folder session dan semua isinya!\n\n` +
+                    `Pilih user yang session folder server-nya ingin dihapus:`;
+
+        bot.sendMessage(chatId, text, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: userButtons }
+        });
+
+    } catch (error) {
+        console.error('Delete session folder error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengambil daftar user: ${error.message}`, getMainMenu());
+    }
+}
+
+async function handleDeleteSessionForUser(chatId, userId) {
+    try {
+        bot.sendMessage(chatId, '🗑️ *Memproses Delete Session Folder*\n\nMengambil server milik user...', { parse_mode: 'Markdown' });
+
+        // Get user info
+        const userInfo = await PteroAPI.getUserInfo(userId);
+        const username = userInfo.attributes.username;
+
+        // Get servers owned by this user
+        const servers = await PteroAPI.getServersByUser(userId);
+
+        if (servers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${username} tidak memiliki server!`, getMainMenu());
+        }
+
+        // Check how many servers have session folders
+        let hasSessionCount = 0;
+
+        for (const server of servers) {
+            const serverUuid = server.attributes.uuid;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+
+            if (fs.existsSync(sessionPath)) {
+                hasSessionCount++;
+            }
+        }
+
+        if (hasSessionCount === 0) {
+            return bot.sendMessage(chatId, `❌ User ${username} tidak memiliki server dengan folder session!`, getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `⚠️ *KONFIRMASI DELETE SESSION FOLDER*\n\n` +
+                              `👤 **User:** ${username}\n` +
+                              `📊 **Total Server:** ${servers.length}\n` +
+                              `📁 **Memiliki Session Folder:** ${hasSessionCount}\n\n` +
+                              `🚨 **PERINGATAN:**\n` +
+                              `• Ini akan menghapus SEMUA folder session milik user ini\n` +
+                              `• Semua file di dalam folder session akan hilang\n` +
+                              `• Aksi ini TIDAK BISA dibatalkan!\n\n` +
+                              `Apakah Anda yakin ingin melanjutkan?`, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Hapus Semua', callback_data: `confirm_delete_${userId}` },
+                        { text: '❌ Batal', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        });
+
+    } catch (error) {
+        console.error('Delete session for user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat memproses user: ${error.message}`, getMainMenu());
+    }
+}
+
+async function executeDeleteSessionForUser(chatId, userId) {
+    try {
+        bot.sendMessage(chatId, '🗑️ *Menghapus Session Folder*\n\nMemulai proses penghapusan...', { parse_mode: 'Markdown' });
+
+        // Get user info
+        const userInfo = await PteroAPI.getUserInfo(userId);
+        const username = userInfo.attributes.username;
+
+        // Get servers owned by this user
+        const servers = await PteroAPI.getServersByUser(userId);
+
+        let deletedCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        for (const server of servers) {
+            try {
+                const serverName = server.attributes.name;
+                const serverUuid = server.attributes.uuid;
+                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+
+                // Check if session folder exists
+                if (!fs.existsSync(sessionPath)) {
+                    skippedCount++;
+                    console.log(`Session folder not found for ${serverName}, skipping...`);
+                    continue;
+                }
+
+                // Delete session folder recursively
+                fs.rmSync(sessionPath, { recursive: true, force: true });
+
+                deletedCount++;
+                console.log(`Deleted session folder for ${serverName}`);
+
+            } catch (error) {
+                errorCount++;
+                console.error(`Error deleting session folder for ${server.attributes.name}:`, error);
+            }
+        }
+
+        const report = `🗑️ *Delete Session Folder Selesai*\n\n` +
+                      `👤 **User:** ${username}\n` +
+                      `📊 **Hasil:**\n` +
+                      `🗑️ Dihapus: ${deletedCount} folder\n` +
+                      `⏭️ Dilewati: ${skippedCount} folder (tidak ada)\n` +
+                      `❌ Error: ${errorCount} folder\n\n` +
+                      `📈 **Total Server User:** ${servers.length}\n` +
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute delete session for user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${error.message}`, getMainMenu());
     }
 }
 
