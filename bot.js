@@ -53,7 +53,7 @@ console.log('🌹 Rose Bot Features: Loaded!');
 // External Panel Configuration
 const EXTERNAL_PANEL = {
     domain: 'https://panel.hostkita.xyz',
-    plta: 'ptla_lQ6F9KAwLPc1U1aT0t8ZdUmegyfIekubR4PiSTmvZnm',
+    plta: 'ptla_08YUzroThsNHieSGRiXFTwhenov385SX3y41vB5wL9Z',
     pltc: 'ptlc_2uHOQZzoz4TbWMfo3uvxmGyEHarU0MMzLuXs8b4Jbje',
     loc: '1',
     eggs: '1'
@@ -109,15 +109,40 @@ class ExternalPteroAPI {
     static async testConnection() {
         try {
             console.log('🧪 Testing External Panel Connection...');
-            const response = await this.appRequest('servers?per_page=1');
+            console.log('🔧 Panel Config:', {
+                domain: EXTERNAL_PANEL.domain,
+                plta_prefix: EXTERNAL_PANEL.plta.substring(0, 15) + '...',
+                full_url: `${EXTERNAL_PANEL.domain}/api/application/servers?per_page=1`
+            });
+
+            // Try users endpoint first (sometimes more permissive)
+            let response;
+            try {
+                response = await this.appRequest('users?per_page=1');
+                console.log('✅ Users endpoint test successful');
+            } catch (userError) {
+                console.log('❌ Users endpoint failed, trying servers...');
+                // Fallback to servers endpoint
+                response = await this.appRequest('servers?per_page=1');
+                console.log('✅ Servers endpoint test successful');
+            }
+
             console.log('✅ External Panel Connection Success:', {
                 domain: EXTERNAL_PANEL.domain,
-                servers_found: response.data?.length || 0,
-                total_servers: response.meta?.pagination?.total || 0
+                response_status: response ? 'OK' : 'Empty',
+                data_found: response.data?.length || 0,
+                total_items: response.meta?.pagination?.total || 0
             });
             return true;
         } catch (error) {
-            console.error('❌ External Panel Connection Failed:', error.message);
+            console.error('❌ External Panel Connection Failed:', {
+                message: error.message,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                response_data: error.response?.data,
+                config_domain: EXTERNAL_PANEL.domain,
+                config_plta_prefix: EXTERNAL_PANEL.plta.substring(0, 15) + '...'
+            });
             return false;
         }
     }
