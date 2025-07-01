@@ -70,8 +70,20 @@ class ExternalPteroAPI {
                 headers: {
                     'Authorization': `Bearer ${EXTERNAL_PANEL.plta}`,
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
+                    'Accept': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0'
+                },
+                timeout: 30000
             };
 
             if (data) config.data = data;
@@ -79,31 +91,84 @@ class ExternalPteroAPI {
             console.log('🌐 External Panel API Request:', {
                 url,
                 method,
-                headers: {
-                    'Authorization': `Bearer ${EXTERNAL_PANEL.plta.substring(0, 10)}...`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
+                user_agent: config.headers['User-Agent'].substring(0, 50) + '...',
+                authorization: `Bearer ${EXTERNAL_PANEL.plta.substring(0, 10)}...`
             });
+
+            // Add delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
             const response = await axios(config);
             console.log('✅ External Panel API Response Status:', response.status);
+
+            // Check if response is HTML (Cloudflare block page)
+            if (response.headers['content-type']?.includes('text/html')) {
+                throw new Error('Cloudflare protection detected - received HTML instead of JSON');
+            }
+
             return response.data;
         } catch (error) {
             console.error('❌ External Panel API Error:', {
                 status: error.response?.status,
                 statusText: error.response?.statusText,
-                data: error.response?.data,
+                data: error.response?.data?.substring ? error.response.data.substring(0, 200) + '...' : error.response?.data,
                 message: error.message,
-                url: `${EXTERNAL_PANEL.domain}/api/application/${endpoint}`
+                url: `${EXTERNAL_PANEL.domain}/api/application/${endpoint}`,
+                is_cloudflare_block: error.response?.data?.includes ? error.response.data.includes('Cloudflare') : false
             });
+
+            // If Cloudflare is blocking, suggest alternative
+            if (error.response?.data?.includes && error.response.data.includes('Cloudflare')) {
+                throw new Error('Cloudflare protection is blocking API access. Consider whitelisting VPS IP or using alternative method.');
+            }
+
             throw error;
         }
     }
 
     static async getAllServers() {
-        const response = await this.appRequest('servers');
-        return response.data || [];
+        try {
+            const response = await this.appRequest('servers');
+            return response.data || [];
+        } catch (error) {
+            console.log('❌ API access failed, trying alternative method...');
+            // Fallback: try to get servers from file system if we have access
+            return await this.getServersFromFileSystem();
+        }
+    }
+
+    static async getServersFromFileSystem() {
+        try {
+            console.log('🔍 Attempting to get servers from file system...');
+
+            // Try to read from pterodactyl volumes directory
+            const volumesPath = '/var/lib/pterodactyl/volumes';
+            if (!fs.existsSync(volumesPath)) {
+                console.log('❌ Pterodactyl volumes directory not accessible');
+                return [];
+            }
+
+            const volumes = fs.readdirSync(volumesPath);
+            const servers = [];
+
+            for (const uuid of volumes) {
+                if (uuid.length === 36) { // UUID format check
+                    servers.push({
+                        attributes: {
+                            uuid: uuid,
+                            name: `Server-${uuid.substring(0, 8)}`, // Fallback name
+                            user: 1 // Default user, will be filtered later
+                        }
+                    });
+                }
+            }
+
+            console.log(`📁 Found ${servers.length} servers from file system`);
+            return servers;
+        } catch (error) {
+            console.error('❌ File system access failed:', error.message);
+            return [];
+        }
     }
 
     static async testConnection() {
