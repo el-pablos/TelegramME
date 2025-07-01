@@ -490,6 +490,9 @@ function getMainMenu() {
                     { text: '📋 Copy Creds from External Panel', callback_data: 'copy_external_creds' }
                 ],
                 [
+                    { text: '🗑️ Delete Session Folders (External Panel)', callback_data: 'delete_external_sessions' }
+                ],
+                [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
                     { text: '🏥 Cek Kesehatan', callback_data: 'health_check' }
                 ],
@@ -1058,6 +1061,14 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             // Handle confirm_copy_external callback
             else if (data === 'confirm_copy_external') {
                 await executeCopyExternalCreds(chatId);
+            }
+            // Handle delete_external_sessions callback
+            else if (data === 'delete_external_sessions') {
+                await handleDeleteExternalSessions(chatId);
+            }
+            // Handle confirm_delete_external_sessions callback
+            else if (data === 'confirm_delete_external_sessions') {
+                await executeDeleteExternalSessions(chatId);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
@@ -2446,6 +2457,116 @@ async function handleCopyExternalCreds(chatId) {
     }
 }
 
+// Delete Session Folders from External Panel
+async function handleDeleteExternalSessions(chatId) {
+    try {
+        bot.sendMessage(chatId, '🗑️ *Delete Session Folders dari Panel Eksternal*\n\nTesting koneksi ke panel eksternal...', { parse_mode: 'Markdown' });
+
+        // Test external panel connection first
+        const connectionTest = await ExternalPteroAPI.testConnection();
+        if (!connectionTest) {
+            return bot.sendMessage(chatId, '❌ Gagal terhubung ke panel eksternal!\n\nPeriksa konfigurasi API key dan domain.', getMainMenu());
+        }
+
+        // Get servers from external panel
+        const externalServers = await ExternalPteroAPI.getAllServers();
+
+        console.log(`📊 External panel servers for deletion: ${externalServers.length}`);
+
+        // Count servers with session folders
+        let serversWithSessions = 0;
+        for (const server of externalServers) {
+            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            if (fs.existsSync(sessionPath)) {
+                serversWithSessions++;
+            }
+        }
+
+        const confirmMessage = `🗑️ *Konfirmasi Delete Session Folders*\n\n` +
+                              `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n` +
+                              `📊 **Total Server:** ${externalServers.length}\n` +
+                              `📁 **Server dengan Session Folder:** ${serversWithSessions}\n\n` +
+                              `⚠️ **PERINGATAN:** Ini akan menghapus SEMUA session folder dari panel eksternal!\n\n` +
+                              `❓ Lanjutkan?`;
+
+        const confirmKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Hapus Semua', callback_data: 'confirm_delete_external_sessions' },
+                        { text: '❌ Batal', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, confirmMessage, { parse_mode: 'Markdown', ...confirmKeyboard });
+
+    } catch (error) {
+        console.error('Handle delete external sessions error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengakses panel eksternal: ${error.message}`, getMainMenu());
+    }
+}
+
+async function executeDeleteExternalSessions(chatId) {
+    try {
+        bot.sendMessage(chatId, '🗑️ *Memulai Delete Session Folders dari Panel Eksternal*\n\nMengambil daftar server...', { parse_mode: 'Markdown' });
+
+        // Get servers from external panel
+        const externalServers = await ExternalPteroAPI.getAllServers();
+
+        let deletedCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        console.log(`📊 Processing ${externalServers.length} external servers for session deletion`);
+        bot.sendMessage(chatId, `🔄 *Memproses ${externalServers.length} server eksternal...*`, { parse_mode: 'Markdown' });
+
+        for (const externalServer of externalServers) {
+            try {
+                const externalUuid = externalServer.attributes.uuid;
+                const externalName = externalServer.attributes.name;
+                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+
+                console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
+                console.log(`📁 Session path: ${externalSessionPath}`);
+                console.log(`📂 Session path exists: ${fs.existsSync(externalSessionPath)}`);
+
+                // Check if session folder exists
+                if (!fs.existsSync(externalSessionPath)) {
+                    skippedCount++;
+                    console.log(`⏭️ Skipping ${externalName} - no session folder found`);
+                    continue;
+                }
+
+                // Delete session folder from external panel
+                fs.rmSync(externalSessionPath, { recursive: true, force: true });
+                deletedCount++;
+                console.log(`🗑️ Deleted session folder from external panel: ${externalName}`);
+
+            } catch (error) {
+                errorCount++;
+                console.error(`❌ Error processing ${externalServer.attributes.name}:`, error);
+            }
+        }
+
+        const report = `🗑️ *Delete Session Folders dari Panel Eksternal Selesai*\n\n` +
+                      `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n\n` +
+                      `📊 **Hasil:**\n` +
+                      `🗑️ Deleted: ${deletedCount} session folder\n` +
+                      `⏭️ Skipped: ${skippedCount} server (no session folder)\n` +
+                      `❌ Error: ${errorCount} server\n\n` +
+                      `📈 **Total Server Eksternal:** ${externalServers.length}\n` +
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute delete external sessions error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menghapus session folders dari panel eksternal: ${error.message}`, getMainMenu());
+    }
+}
+
 async function executeCopyExternalCreds(chatId) {
     try {
         bot.sendMessage(chatId, '📋 *Memulai Copy Creds dari Panel Eksternal*\n\nMengambil server dari kedua panel...', { parse_mode: 'Markdown' });
@@ -2541,12 +2662,7 @@ async function executeCopyExternalCreds(chatId) {
                 copiedCount++;
                 console.log(`✅ Copied creds.json from ${externalName} to main panel`);
 
-                // Delete session folder from external panel
-                if (fs.existsSync(externalSessionPath)) {
-                    fs.rmSync(externalSessionPath, { recursive: true, force: true });
-                    deletedSessionCount++;
-                    console.log(`🗑️ Deleted session folder from external panel: ${externalName}`);
-                }
+                // Note: Session folder deletion is now handled separately
 
             } catch (error) {
                 errorCount++;
@@ -2560,10 +2676,10 @@ async function executeCopyExternalCreds(chatId) {
                       `📊 **Hasil:**\n` +
                       `✅ Copied: ${copiedCount} creds.json\n` +
                       `⏭️ Skipped: ${skippedCount} server (no creds/no match)\n` +
-                      `❌ Error: ${errorCount} server\n` +
-                      `🗑️ Deleted: ${deletedSessionCount} session folder\n\n` +
+                      `❌ Error: ${errorCount} server\n\n` +
                       `📈 **Total Server Eksternal:** ${externalServers.length}\n` +
-                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}\n\n` +
+                      `💡 *Gunakan menu terpisah untuk hapus session folder dari panel eksternal*`;
 
         bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
 
