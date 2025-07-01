@@ -1103,6 +1103,9 @@ Selamat datang! Pilih aksi yang diinginkan:`;
         case 'more_users':
             await handleMoreUsers(chatId);
             break;
+        case 'manage_blacklist':
+            await handleManageBlacklist(chatId);
+            break;
         default:
             // Handle session_user_ callbacks
             if (data.startsWith('session_user_')) {
@@ -1148,10 +1151,6 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             // Handle setor_creds_cancel callback
             else if (data === 'setor_creds_cancel') {
                 await handleSetorCredsCancel(chatId);
-            }
-            // Handle manage_blacklist callback
-            else if (data === 'manage_blacklist') {
-                await handleManageBlacklist(chatId);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
