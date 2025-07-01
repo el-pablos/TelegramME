@@ -3120,29 +3120,29 @@ async function handleSetorCredsCancel(chatId) {
 async function handleManageBlacklist(chatId) {
     try {
         let message = `🚫 *Manage Panel Blacklist*\n\n`;
-        message += `📋 **Panel yang Diblacklist:**\n`;
+        message += `📋 *Panel yang Diblacklist:*\n`;
 
         if (PANEL_BLACKLIST.length === 0) {
             message += `✅ Tidak ada panel yang diblacklist\n\n`;
         } else {
             for (let i = 0; i < PANEL_BLACKLIST.length; i++) {
-                message += `${i + 1}. ${PANEL_BLACKLIST[i]}\n`;
+                message += `${i + 1}\\. ${PANEL_BLACKLIST[i]}\n`;
             }
             message += `\n`;
         }
 
-        message += `🔍 **Status Panel Saat Ini:**\n`;
+        message += `🔍 *Status Panel Saat Ini:*\n`;
         message += `🏠 Panel Utama: ${PANEL_URL}\n`;
         message += `   Status: ${isPanelBlacklisted(PANEL_URL) ? '🚫 DIBLACKLIST' : '✅ Diizinkan'}\n`;
         message += `🌐 Panel Eksternal: ${EXTERNAL_PANEL.domain}\n`;
         message += `   Status: ${isPanelBlacklisted(EXTERNAL_PANEL.domain) ? '🚫 DIBLACKLIST' : '✅ Diizinkan'}\n\n`;
 
-        message += `⚠️ **Catatan:**\n`;
+        message += `⚠️ *Catatan:*\n`;
         message += `• Panel yang diblacklist tidak bisa digunakan untuk operasi apapun\n`;
         message += `• Termasuk: Setor Creds, Copy Creds, Create Server, dll\n`;
         message += `• Blacklist bersifat permanen sampai dihapus dari konfigurasi\n\n`;
 
-        message += `🛠️ **Untuk menambah/hapus blacklist, edit konfigurasi PANEL_BLACKLIST di bot.js**`;
+        message += `🛠️ *Untuk menambah/hapus blacklist, edit konfigurasi PANEL\\_BLACKLIST di bot\\.js*`;
 
         const keyboard = {
             reply_markup: {
