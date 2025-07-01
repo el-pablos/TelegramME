@@ -118,13 +118,28 @@ class PteroAPI {
 
     static async getUserInfo(userId) {
         const response = await this.appRequest(`users/${userId}`);
-        return response.attributes;
+        console.log('👤 User API Response:', JSON.stringify(response, null, 2));
+        return response.attributes || response;
     }
 
     static async getServersByUser(userId) {
-        // Get all servers and filter by user
-        const allServers = await this.getAllServers();
-        return allServers.filter(server => server.attributes.user === parseInt(userId));
+        try {
+            // Get all servers and filter by user
+            const allServers = await this.getAllServers();
+            console.log('🔍 Filtering servers for user ID:', userId);
+            console.log('📊 Sample server structure:', JSON.stringify(allServers[0], null, 2));
+
+            const userServers = allServers.filter(server => {
+                const serverUserId = server.attributes?.user || server.user;
+                return serverUserId === parseInt(userId);
+            });
+
+            console.log(`📈 Found ${userServers.length} servers for user ${userId}`);
+            return userServers;
+        } catch (error) {
+            console.error('Error getting servers by user:', error);
+            return [];
+        }
     }
 
     static async restartServer(serverIdentifier) {
@@ -1829,7 +1844,7 @@ async function handleSessionFolderForUser(chatId, userId) {
 
         // Get user info
         const userInfo = await PteroAPI.getUserInfo(userId);
-        const username = userInfo.attributes.username;
+        const username = userInfo.attributes?.username || userInfo.username || `User-${userId}`;
 
         // Get servers owned by this user
         const servers = await PteroAPI.getServersByUser(userId);
@@ -2096,7 +2111,7 @@ async function handleDeleteSessionForUser(chatId, userId) {
 
         // Get user info
         const userInfo = await PteroAPI.getUserInfo(userId);
-        const username = userInfo.attributes.username;
+        const username = userInfo.attributes?.username || userInfo.username || `User-${userId}`;
 
         // Get servers owned by this user
         const servers = await PteroAPI.getServersByUser(userId);
@@ -2153,7 +2168,7 @@ async function executeDeleteSessionForUser(chatId, userId) {
 
         // Get user info
         const userInfo = await PteroAPI.getUserInfo(userId);
-        const username = userInfo.attributes.username;
+        const username = userInfo.attributes?.username || userInfo.username || `User-${userId}`;
 
         // Get servers owned by this user
         const servers = await PteroAPI.getServersByUser(userId);
