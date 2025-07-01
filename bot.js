@@ -52,9 +52,9 @@ console.log('🌹 Rose Bot Features: Loaded!');
 
 // External Panel Configuration
 const EXTERNAL_PANEL = {
-    domain: 'https://panel.hostkita.xyz/',
-    plta: 'ptla_Hz6bi8fWWq3vk00bUXGEEHRXNyecx31PWf4UskMWShl',
-    pltc: 'ptlc_TE1p2L89218unWzF6daZ4daiUtPrgxXaBI1e52VXjnd',
+    domain: 'https://panel.hostkita.xyz',
+    plta: 'ptla_lQ6F9KAwLPc1U1aT0t8ZdUmegyfIekubR4PiSTmvZnm',
+    pltc: 'ptlc_2uHOQZzoz4TbWMfo3uvxmGyEHarU0MMzLuXs8b4Jbje',
     loc: '1',
     eggs: '1'
 };
@@ -63,9 +63,10 @@ const EXTERNAL_PANEL = {
 class ExternalPteroAPI {
     static async appRequest(endpoint, method = 'GET', data = null) {
         try {
+            const url = `${EXTERNAL_PANEL.domain}/api/application/${endpoint}`;
             const config = {
                 method,
-                url: `${EXTERNAL_PANEL.domain}/api/application/${endpoint}`,
+                url,
                 headers: {
                     'Authorization': `Bearer ${EXTERNAL_PANEL.plta}`,
                     'Content-Type': 'application/json',
@@ -75,10 +76,27 @@ class ExternalPteroAPI {
 
             if (data) config.data = data;
 
+            console.log('🌐 External Panel API Request:', {
+                url,
+                method,
+                headers: {
+                    'Authorization': `Bearer ${EXTERNAL_PANEL.plta.substring(0, 10)}...`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
             const response = await axios(config);
+            console.log('✅ External Panel API Response Status:', response.status);
             return response.data;
         } catch (error) {
-            console.error('External Panel API Error:', error.response?.data || error.message);
+            console.error('❌ External Panel API Error:', {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data,
+                message: error.message,
+                url: `${EXTERNAL_PANEL.domain}/api/application/${endpoint}`
+            });
             throw error;
         }
     }
@@ -86,6 +104,22 @@ class ExternalPteroAPI {
     static async getAllServers() {
         const response = await this.appRequest('servers');
         return response.data || [];
+    }
+
+    static async testConnection() {
+        try {
+            console.log('🧪 Testing External Panel Connection...');
+            const response = await this.appRequest('servers?per_page=1');
+            console.log('✅ External Panel Connection Success:', {
+                domain: EXTERNAL_PANEL.domain,
+                servers_found: response.data?.length || 0,
+                total_servers: response.meta?.pagination?.total || 0
+            });
+            return true;
+        } catch (error) {
+            console.error('❌ External Panel Connection Failed:', error.message);
+            return false;
+        }
     }
 }
 
@@ -2271,7 +2305,15 @@ async function executeDeleteSessionForUser(chatId, userId) {
 // Copy Creds from External Panel
 async function handleCopyExternalCreds(chatId) {
     try {
-        bot.sendMessage(chatId, '📋 *Copy Creds from External Panel*\n\nMengambil daftar server dari panel eksternal...', { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, '📋 *Copy Creds from External Panel*\n\nTesting koneksi ke panel eksternal...', { parse_mode: 'Markdown' });
+
+        // Test external panel connection first
+        const connectionTest = await ExternalPteroAPI.testConnection();
+        if (!connectionTest) {
+            return bot.sendMessage(chatId, '❌ Gagal terhubung ke panel eksternal!\n\nPeriksa konfigurasi API key dan domain.', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, '✅ Koneksi berhasil! Mengambil daftar server...', { parse_mode: 'Markdown' });
 
         // Get servers from external panel
         const externalServers = await ExternalPteroAPI.getAllServers();
