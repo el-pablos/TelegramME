@@ -19,6 +19,9 @@ const WelcomeModule = require('./modules/welcome');
 const NotesModule = require('./modules/notes');
 const LocksModule = require('./modules/locks');
 
+// Global variables for state tracking
+const setorCredsState = new Map(); // Track setor creds upload state
+
 // Configuration
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_TELEGRAM_ID);
@@ -498,6 +501,9 @@ function getMainMenu() {
                     { text: '🗑️ Delete Session Folders (External Panel)', callback_data: 'delete_external_sessions' }
                 ],
                 [
+                    { text: '📤 Setor Creds (Upload JSON Files)', callback_data: 'setor_creds' }
+                ],
+                [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
                     { text: '🏥 Cek Kesehatan', callback_data: 'health_check' }
                 ],
@@ -944,6 +950,16 @@ bot.on('message', async (msg) => {
     // Skip if not owner
     if (!isOwner(userId)) return;
 
+    // Handle /done command for setor creds
+    if (msg.text === '/done') {
+        if (setorCredsState.has(chatId)) {
+            await handleSetorCredsDone(chatId);
+        } else {
+            bot.sendMessage(chatId, '❌ Tidak ada proses upload yang sedang berlangsung.', getMainMenu());
+        }
+        return;
+    }
+
     // Skip if it's a command
     if (msg.text && msg.text.startsWith('/')) return;
 
@@ -1080,6 +1096,18 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             // Handle confirm_delete_external_sessions callback
             else if (data === 'confirm_delete_external_sessions') {
                 await executeDeleteExternalSessions(chatId);
+            }
+            // Handle setor_creds callback
+            else if (data === 'setor_creds') {
+                await handleSetorCreds(chatId);
+            }
+            // Handle setor_creds_done callback
+            else if (data === 'setor_creds_done') {
+                await handleSetorCredsDone(chatId);
+            }
+            // Handle setor_creds_cancel callback
+            else if (data === 'setor_creds_cancel') {
+                await handleSetorCredsCancel(chatId);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
@@ -2677,19 +2705,42 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
                 let credsFound = false;
                 let actualCredsPath = externalCredsPath;
 
-                // Try different possible locations for creds.json
+                // Try different possible locations for JSON files (any name)
                 const possiblePaths = [
                     externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/session/creds.json
                     `/var/lib/pterodactyl/volumes/${externalUuid}/creds.json`, // Direct in volume
                     `/var/lib/pterodactyl/volumes/${externalUuid}/session/plugins/creds.json`, // In plugins folder
                 ];
 
-                for (const path of possiblePaths) {
-                    if (fs.existsSync(path)) {
-                        credsFound = true;
-                        actualCredsPath = path;
-                        console.log(`✅ Found creds.json at: ${path}`);
-                        break;
+                // Also check for any .json files in session directory
+                const sessionDir = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                if (fs.existsSync(sessionDir)) {
+                    try {
+                        const files = fs.readdirSync(sessionDir);
+                        for (const file of files) {
+                            if (file.endsWith('.json')) {
+                                possiblePaths.push(path.join(sessionDir, file));
+                            }
+                        }
+                    } catch (error) {
+                        console.log(`⚠️ Could not read session directory: ${sessionDir}`);
+                    }
+                }
+
+                for (const filePath of possiblePaths) {
+                    if (fs.existsSync(filePath)) {
+                        try {
+                            // Validate it's a valid JSON file
+                            const content = fs.readFileSync(filePath, 'utf8');
+                            JSON.parse(content);
+                            credsFound = true;
+                            actualCredsPath = filePath;
+                            const fileName = path.basename(filePath);
+                            console.log(`✅ Found JSON file: ${fileName} at: ${filePath}`);
+                            break;
+                        } catch (error) {
+                            console.log(`⚠️ Invalid JSON file: ${filePath}`);
+                        }
                     }
                 }
 
@@ -2759,6 +2810,237 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
     }
 }
 
+// Setor Creds - Upload Multiple JSON Files
+async function handleSetorCreds(chatId) {
+    try {
+        // Get all servers to check availability
+        const servers = await PteroAPI.getAllServers();
+
+        if (servers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel utama!', getMainMenu());
+        }
+
+        // Count servers without creds.json
+        let availableServers = 0;
+        for (const server of servers) {
+            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            const credsPath = `${sessionPath}/creds.json`;
+
+            if (!fs.existsSync(credsPath)) {
+                availableServers++;
+            }
+        }
+
+        const message = `📤 *Setor Creds - Upload JSON Files*\n\n` +
+                       `📊 **Status Panel:**\n` +
+                       `🏠 Panel Utama: ${PANEL_URL}\n` +
+                       `📈 Total Server: ${servers.length}\n` +
+                       `🆓 Server Kosong (tanpa creds): ${availableServers}\n\n` +
+                       `📋 **Cara Penggunaan:**\n` +
+                       `1️⃣ Kirim file JSON (nama bebas: jmbut.json, config.json, dll)\n` +
+                       `2️⃣ Bot akan auto-rename jadi creds.json\n` +
+                       `3️⃣ Auto-distribute ke server kosong (1 file = 1 server)\n` +
+                       `4️⃣ Kirim /done untuk selesai\n\n` +
+                       `⚠️ **Catatan:**\n` +
+                       `• Hanya file .json yang diterima\n` +
+                       `• File akan di-validate sebagai JSON\n` +
+                       `• Tidak akan menimpa creds.json yang sudah ada\n` +
+                       `• Maksimal ${availableServers} file bisa diupload\n\n` +
+                       `📤 **Mulai upload file JSON Anda!**`;
+
+        // Set user to setor creds mode
+        setorCredsState.set(chatId, {
+            uploadedFiles: [],
+            availableServers: servers.filter(server => {
+                const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+                const credsPath = `${sessionPath}/creds.json`;
+                return !fs.existsSync(credsPath);
+            }),
+            startTime: new Date()
+        });
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Selesai Upload', callback_data: 'setor_creds_done' },
+                        { text: '❌ Batal', callback_data: 'setor_creds_cancel' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+        console.error('Handle setor creds error:', error);
+        bot.sendMessage(chatId, `❌ Error saat memulai setor creds: ${error.message}`, getMainMenu());
+    }
+}
+
+async function handleSetorCredsUpload(chatId, msg) {
+    try {
+        const document = msg.document;
+        const state = setorCredsState.get(chatId);
+
+        if (!state) {
+            return bot.sendMessage(chatId, '❌ Session setor creds tidak ditemukan. Mulai ulang dari menu.', getMainMenu());
+        }
+
+        // Check file extension
+        const fileName = document.file_name || 'unknown.file';
+        const fileExt = path.extname(fileName).toLowerCase();
+
+        if (fileExt !== '.json') {
+            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${fileName}\nAlasan: Hanya file .json yang diterima\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
+        }
+
+        // Check if we have available servers
+        if (state.availableServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ *Tidak Ada Server Kosong*\n\nSemua server sudah memiliki creds.json\nGunakan /done untuk menyelesaikan upload.`, { parse_mode: 'Markdown' });
+        }
+
+        // Check file size (max 1MB for JSON)
+        if (document.file_size > 1024 * 1024) {
+            return bot.sendMessage(chatId, `❌ *File Terlalu Besar*\n\nFile: ${fileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\nMaksimal: 1 MB\n\nSilakan upload file yang lebih kecil.`, { parse_mode: 'Markdown' });
+        }
+
+        bot.sendMessage(chatId, `📥 *Memproses File*\n\nFile: ${fileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\n\nMengunduh dan memvalidasi...`, { parse_mode: 'Markdown' });
+
+        // Download file
+        const fileLink = await bot.getFileLink(document.file_id);
+        const response = await axios.get(fileLink, { responseType: 'text' });
+        const fileContent = response.data;
+
+        // Validate JSON
+        let jsonData;
+        try {
+            jsonData = JSON.parse(fileContent);
+        } catch (parseError) {
+            return bot.sendMessage(chatId, `❌ *File JSON Tidak Valid*\n\nFile: ${fileName}\nError: ${parseError.message}\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
+        }
+
+        // Get next available server
+        const targetServer = state.availableServers.shift(); // Remove from available list
+        const targetUuid = targetServer.attributes.uuid;
+        const targetName = targetServer.attributes.name;
+
+        // Create target paths
+        const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/session`;
+        const targetCredsPath = `${targetSessionPath}/creds.json`;
+
+        // Create session directory if it doesn't exist
+        if (!fs.existsSync(targetSessionPath)) {
+            fs.mkdirSync(targetSessionPath, { recursive: true, mode: 0o755 });
+        }
+
+        // Write creds.json to target server
+        fs.writeFileSync(targetCredsPath, JSON.stringify(jsonData, null, 2), { mode: 0o644 });
+
+        // Update state
+        state.uploadedFiles.push({
+            originalName: fileName,
+            targetServer: targetName,
+            targetUuid: targetUuid,
+            uploadTime: new Date()
+        });
+
+        // Update state in map
+        setorCredsState.set(chatId, state);
+
+        const successMessage = `✅ *File Berhasil Diupload*\n\n` +
+                              `📄 **File:** ${fileName}\n` +
+                              `🎯 **Target Server:** ${targetName}\n` +
+                              `📁 **Disimpan sebagai:** creds.json\n` +
+                              `📊 **Progress:** ${state.uploadedFiles.length} file uploaded\n` +
+                              `🆓 **Server Kosong Tersisa:** ${state.availableServers.length}\n\n` +
+                              `📤 **Lanjutkan upload file berikutnya atau klik Selesai**`;
+
+        bot.sendMessage(chatId, successMessage, { parse_mode: 'Markdown' });
+
+    } catch (error) {
+        console.error('Handle setor creds upload error:', error);
+        bot.sendMessage(chatId, `❌ Error saat memproses file: ${error.message}`, { parse_mode: 'Markdown' });
+    }
+}
+
+async function handleSetorCredsDone(chatId) {
+    try {
+        const state = setorCredsState.get(chatId);
+
+        if (!state) {
+            return bot.sendMessage(chatId, '❌ Session setor creds tidak ditemukan.', getMainMenu());
+        }
+
+        const uploadedCount = state.uploadedFiles.length;
+        const duration = Math.round((new Date() - state.startTime) / 1000);
+
+        if (uploadedCount === 0) {
+            setorCredsState.delete(chatId);
+            return bot.sendMessage(chatId, '📤 *Setor Creds Dibatalkan*\n\nTidak ada file yang diupload.', getMainMenu());
+        }
+
+        let report = `✅ *Setor Creds Selesai*\n\n`;
+        report += `📊 **Ringkasan:**\n`;
+        report += `📤 Total File Uploaded: ${uploadedCount}\n`;
+        report += `⏱️ Durasi: ${duration} detik\n`;
+        report += `⏰ Selesai: ${new Date().toLocaleString('id-ID')}\n\n`;
+        report += `📋 **Detail Upload:**\n`;
+
+        for (let i = 0; i < state.uploadedFiles.length; i++) {
+            const file = state.uploadedFiles[i];
+            report += `${i + 1}. ${file.originalName} → ${file.targetServer}\n`;
+        }
+
+        report += `\n🎯 **Semua file berhasil disimpan sebagai creds.json di server masing-masing**`;
+
+        // Clear state
+        setorCredsState.delete(chatId);
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle setor creds done error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menyelesaikan setor creds: ${error.message}`, getMainMenu());
+    }
+}
+
+async function handleSetorCredsCancel(chatId) {
+    try {
+        const state = setorCredsState.get(chatId);
+
+        if (!state) {
+            return bot.sendMessage(chatId, '❌ Session setor creds tidak ditemukan.', getMainMenu());
+        }
+
+        const uploadedCount = state.uploadedFiles.length;
+
+        if (uploadedCount > 0) {
+            let report = `❌ *Setor Creds Dibatalkan*\n\n`;
+            report += `📊 **File yang sudah diupload:** ${uploadedCount}\n\n`;
+            report += `📋 **Detail:**\n`;
+
+            for (let i = 0; i < state.uploadedFiles.length; i++) {
+                const file = state.uploadedFiles[i];
+                report += `${i + 1}. ${file.originalName} → ${file.targetServer}\n`;
+            }
+
+            report += `\n⚠️ **File yang sudah diupload tetap tersimpan di server**`;
+
+            bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+        } else {
+            bot.sendMessage(chatId, '❌ *Setor Creds Dibatalkan*\n\nTidak ada file yang diupload.', getMainMenu());
+        }
+
+        // Clear state
+        setorCredsState.delete(chatId);
+
+    } catch (error) {
+        console.error('Handle setor creds cancel error:', error);
+        bot.sendMessage(chatId, `❌ Error saat membatalkan setor creds: ${error.message}`, getMainMenu());
+    }
+}
+
 async function executeCopyExternalCreds(chatId) {
     try {
         bot.sendMessage(chatId, '📋 *Memulai Copy Creds dari Panel Eksternal*\n\nMengambil server dari kedua panel...', { parse_mode: 'Markdown' });
@@ -2795,19 +3077,42 @@ async function executeCopyExternalCreds(chatId) {
                 let credsFound = false;
                 let actualCredsPath = externalCredsPath;
 
-                // Try different possible locations for creds.json
+                // Try different possible locations for JSON files (any name)
                 const possiblePaths = [
                     externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/session/creds.json
                     `/var/lib/pterodactyl/volumes/${externalUuid}/creds.json`, // Direct in volume
                     `/var/lib/pterodactyl/volumes/${externalUuid}/session/plugins/creds.json`, // In plugins folder
                 ];
 
-                for (const path of possiblePaths) {
-                    if (fs.existsSync(path)) {
-                        credsFound = true;
-                        actualCredsPath = path;
-                        console.log(`✅ Found creds.json at: ${path}`);
-                        break;
+                // Also check for any .json files in session directory
+                const sessionDir = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                if (fs.existsSync(sessionDir)) {
+                    try {
+                        const files = fs.readdirSync(sessionDir);
+                        for (const file of files) {
+                            if (file.endsWith('.json')) {
+                                possiblePaths.push(path.join(sessionDir, file));
+                            }
+                        }
+                    } catch (error) {
+                        console.log(`⚠️ Could not read session directory: ${sessionDir}`);
+                    }
+                }
+
+                for (const filePath of possiblePaths) {
+                    if (fs.existsSync(filePath)) {
+                        try {
+                            // Validate it's a valid JSON file
+                            const content = fs.readFileSync(filePath, 'utf8');
+                            JSON.parse(content);
+                            credsFound = true;
+                            actualCredsPath = filePath;
+                            const fileName = path.basename(filePath);
+                            console.log(`✅ Found JSON file: ${fileName} at: ${filePath}`);
+                            break;
+                        } catch (error) {
+                            console.log(`⚠️ Invalid JSON file: ${filePath}`);
+                        }
                     }
                 }
 
@@ -2903,6 +3208,24 @@ async function executeCopyExternalCreds(chatId) {
 // Error handling
 bot.on('polling_error', (error) => {
     console.error('Polling error:', error.message);
+});
+
+// Handle document uploads
+bot.on('document', async (msg) => {
+    const chatId = msg.chat.id;
+    const document = msg.document;
+
+    // Check if user is in setor creds mode
+    if (setorCredsState.has(chatId)) {
+        await handleSetorCredsUpload(chatId, msg);
+        return;
+    }
+
+    // If not in setor creds mode, ignore document
+    bot.sendMessage(chatId, '📄 *File diterima*\n\nUntuk upload creds JSON, gunakan menu "📤 Setor Creds" terlebih dahulu.', {
+        parse_mode: 'Markdown',
+        ...getMainMenu()
+    });
 });
 
 process.on('SIGINT', () => {
