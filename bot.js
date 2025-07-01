@@ -83,6 +83,9 @@ console.log('👤 Owner ID:', OWNER_ID);
 console.log('🌐 Panel URL:', PANEL_URL);
 console.log('🌹 Rose Bot Features: Loaded!');
 
+// Load blacklist from file
+loadBlacklistFromFile();
+
 // External Panel Configuration
 const EXTERNAL_PANEL = {
     domain: 'https://panel-one.ndikafath.com',
@@ -93,11 +96,14 @@ const EXTERNAL_PANEL = {
 };
 
 // Panel Blacklist - Panel yang tidak boleh digunakan
-const PANEL_BLACKLIST = [
+let PANEL_BLACKLIST = [
     'panel.hostkita.xyz',
     'panel-blocked.example.com',
     // Tambahkan domain panel yang ingin diblacklist
 ];
+
+// State untuk manage blacklist
+const blacklistStates = new Map();
 
 // External Panel API helper
 class ExternalPteroAPI {
@@ -1000,6 +1006,20 @@ bot.on('message', async (msg) => {
         return;
     }
 
+    // Handle /cancel command for blacklist
+    if (msg.text === '/cancel') {
+        if (blacklistStates.has(chatId)) {
+            blacklistStates.delete(chatId);
+            return bot.sendMessage(chatId, '❌ Operasi dibatalkan.', { ...getBackToBlacklistMenu() });
+        }
+    }
+
+    // Handle blacklist add input
+    if (blacklistStates.has(chatId) && blacklistStates.get(chatId).action === 'add') {
+        await handleAddBlacklistInput(chatId, msg.text);
+        return;
+    }
+
     // Skip if it's a command
     if (msg.text && msg.text.startsWith('/')) return;
 
@@ -1106,6 +1126,12 @@ Selamat datang! Pilih aksi yang diinginkan:`;
         case 'manage_blacklist':
             await handleManageBlacklist(chatId);
             break;
+        case 'add_blacklist':
+            await handleAddBlacklist(chatId);
+            break;
+        case 'remove_blacklist':
+            await handleRemoveBlacklist(chatId);
+            break;
         default:
             // Handle session_user_ callbacks
             if (data.startsWith('session_user_')) {
@@ -1151,6 +1177,11 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             // Handle setor_creds_cancel callback
             else if (data === 'setor_creds_cancel') {
                 await handleSetorCredsCancel(chatId);
+            }
+            // Handle blacklist_remove_ callbacks
+            else if (data.startsWith('blacklist_remove_')) {
+                const index = parseInt(data.replace('blacklist_remove_', ''));
+                await executeRemoveBlacklist(chatId, index);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
@@ -3148,6 +3179,10 @@ async function handleManageBlacklist(chatId) {
             reply_markup: {
                 inline_keyboard: [
                     [
+                        { text: '➕ Tambah Panel', callback_data: 'add_blacklist' },
+                        { text: '➖ Hapus Panel', callback_data: 'remove_blacklist' }
+                    ],
+                    [
                         { text: '🔄 Refresh Status', callback_data: 'manage_blacklist' },
                         { text: '🔙 Kembali', callback_data: 'admin_panel' }
                     ]
@@ -3161,6 +3196,211 @@ async function handleManageBlacklist(chatId) {
         console.error('Handle manage blacklist error:', error);
         bot.sendMessage(chatId, `❌ Error saat menampilkan blacklist: ${error.message}`, getMainMenu());
     }
+}
+
+// Handle Add Blacklist
+async function handleAddBlacklist(chatId) {
+    try {
+        const message = `➕ *Tambah Panel ke Blacklist*\n\n` +
+                       `🔗 Kirim URL/domain panel yang ingin diblacklist\n\n` +
+                       `📝 *Contoh format:*\n` +
+                       `• panel\\.example\\.com\n` +
+                       `• https://panel\\.example\\.com\n` +
+                       `• subdomain\\.panel\\.com\n\n` +
+                       `⚠️ *Catatan:*\n` +
+                       `• Panel yang diblacklist tidak bisa digunakan\n` +
+                       `• Pastikan URL/domain benar sebelum menambah\n` +
+                       `• Ketik /cancel untuk membatalkan`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '❌ Batal', callback_data: 'manage_blacklist' }
+                    ]
+                ]
+            }
+        };
+
+        blacklistStates.set(chatId, { action: 'add' });
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+        console.error('Handle add blacklist error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+    }
+}
+
+// Handle Remove Blacklist
+async function handleRemoveBlacklist(chatId) {
+    try {
+        if (PANEL_BLACKLIST.length === 0) {
+            return bot.sendMessage(chatId,
+                `❌ *Tidak Ada Panel untuk Dihapus*\n\n` +
+                `Blacklist kosong, tidak ada panel yang bisa dihapus.`,
+                { parse_mode: 'Markdown', ...getBackToBlacklistMenu() }
+            );
+        }
+
+        let message = `➖ *Hapus Panel dari Blacklist*\n\n`;
+        message += `📋 *Pilih panel yang ingin dihapus:*\n\n`;
+
+        const keyboard = [];
+        for (let i = 0; i < PANEL_BLACKLIST.length; i++) {
+            message += `${i + 1}\\. ${PANEL_BLACKLIST[i]}\n`;
+            keyboard.push([
+                { text: `🗑️ Hapus: ${PANEL_BLACKLIST[i]}`, callback_data: `blacklist_remove_${i}` }
+            ]);
+        }
+
+        keyboard.push([
+            { text: '🔙 Kembali', callback_data: 'manage_blacklist' }
+        ]);
+
+        const keyboardMarkup = {
+            reply_markup: {
+                inline_keyboard: keyboard
+            }
+        };
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...keyboardMarkup });
+
+    } catch (error) {
+        console.error('Handle remove blacklist error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+    }
+}
+
+// Execute Remove Blacklist
+async function executeRemoveBlacklist(chatId, index) {
+    try {
+        if (index < 0 || index >= PANEL_BLACKLIST.length) {
+            return bot.sendMessage(chatId,
+                `❌ *Index Tidak Valid*\n\nPanel tidak ditemukan dalam blacklist.`,
+                { parse_mode: 'Markdown', ...getBackToBlacklistMenu() }
+            );
+        }
+
+        const removedPanel = PANEL_BLACKLIST[index];
+        PANEL_BLACKLIST.splice(index, 1);
+
+        // Save to file (optional - for persistence)
+        await saveBlacklistToFile();
+
+        const message = `✅ *Panel Berhasil Dihapus dari Blacklist*\n\n` +
+                       `🗑️ *Panel yang dihapus:*\n` +
+                       `${removedPanel}\n\n` +
+                       `📊 *Status blacklist:*\n` +
+                       `Total panel: ${PANEL_BLACKLIST.length}\n\n` +
+                       `✅ Panel ini sekarang bisa digunakan untuk operasi bot.`;
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...getBackToBlacklistMenu() });
+
+    } catch (error) {
+        console.error('Execute remove blacklist error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menghapus: ${error.message}`, getMainMenu());
+    }
+}
+
+// Handle Add Blacklist Input
+async function handleAddBlacklistInput(chatId, input) {
+    try {
+        // Clean and validate input
+        let domain = input.trim();
+
+        // Remove protocol if present
+        domain = domain.replace(/^https?:\/\//, '');
+
+        // Remove trailing slash
+        domain = domain.replace(/\/$/, '');
+
+        // Basic validation
+        if (!domain || domain.length < 3) {
+            return bot.sendMessage(chatId,
+                `❌ *Domain Tidak Valid*\n\n` +
+                `Domain terlalu pendek atau kosong.\n` +
+                `Silakan masukkan domain yang valid.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+
+        // Check if already in blacklist
+        if (PANEL_BLACKLIST.includes(domain)) {
+            return bot.sendMessage(chatId,
+                `⚠️ *Domain Sudah Ada*\n\n` +
+                `Domain "${domain}" sudah ada dalam blacklist.\n\n` +
+                `Silakan masukkan domain lain atau ketik /cancel untuk membatalkan.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+
+        // Add to blacklist
+        PANEL_BLACKLIST.push(domain);
+        blacklistStates.delete(chatId);
+
+        // Save to file (optional - for persistence)
+        await saveBlacklistToFile();
+
+        const message = `✅ *Panel Berhasil Ditambahkan ke Blacklist*\n\n` +
+                       `➕ *Panel yang ditambahkan:*\n` +
+                       `${domain}\n\n` +
+                       `📊 *Status blacklist:*\n` +
+                       `Total panel: ${PANEL_BLACKLIST.length}\n\n` +
+                       `🚫 Panel ini sekarang tidak bisa digunakan untuk operasi bot.`;
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...getBackToBlacklistMenu() });
+
+    } catch (error) {
+        console.error('Handle add blacklist input error:', error);
+        blacklistStates.delete(chatId);
+        bot.sendMessage(chatId, `❌ Error saat menambah blacklist: ${error.message}`, getMainMenu());
+    }
+}
+
+// Save blacklist to file (for persistence)
+async function saveBlacklistToFile() {
+    try {
+        const fs = require('fs').promises;
+        const blacklistData = {
+            blacklist: PANEL_BLACKLIST,
+            updated: new Date().toISOString()
+        };
+
+        await fs.writeFile('blacklist.json', JSON.stringify(blacklistData, null, 2));
+        console.log('✅ Blacklist saved to file');
+    } catch (error) {
+        console.error('❌ Error saving blacklist:', error);
+    }
+}
+
+// Load blacklist from file (for persistence)
+async function loadBlacklistFromFile() {
+    try {
+        const fs = require('fs').promises;
+        const data = await fs.readFile('blacklist.json', 'utf8');
+        const blacklistData = JSON.parse(data);
+
+        if (blacklistData.blacklist && Array.isArray(blacklistData.blacklist)) {
+            PANEL_BLACKLIST.length = 0; // Clear current array
+            PANEL_BLACKLIST.push(...blacklistData.blacklist); // Add loaded data
+            console.log(`✅ Blacklist loaded from file: ${PANEL_BLACKLIST.length} entries`);
+        }
+    } catch (error) {
+        console.log('ℹ️ No blacklist file found, using default configuration');
+    }
+}
+
+// Helper function for back to blacklist menu
+function getBackToBlacklistMenu() {
+    return {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '🔙 Kembali ke Blacklist', callback_data: 'manage_blacklist' }
+                ]
+            ]
+        }
+    };
 }
 
 async function executeCopyExternalCreds(chatId) {
