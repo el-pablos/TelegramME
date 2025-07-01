@@ -50,6 +50,45 @@ console.log('👤 Owner ID:', OWNER_ID);
 console.log('🌐 Panel URL:', PANEL_URL);
 console.log('🌹 Rose Bot Features: Loaded!');
 
+// External Panel Configuration
+const EXTERNAL_PANEL = {
+    domain: 'https://panel.hostkita.xyz/',
+    plta: 'ptla_Hz6bi8fWWq3vk00bUXGEEHRXNyecx31PWf4UskMWShl',
+    pltc: 'ptlc_TE1p2L89218unWzF6daZ4daiUtPrgxXaBI1e52VXjnd',
+    loc: '1',
+    eggs: '1'
+};
+
+// External Panel API helper
+class ExternalPteroAPI {
+    static async appRequest(endpoint, method = 'GET', data = null) {
+        try {
+            const config = {
+                method,
+                url: `${EXTERNAL_PANEL.domain}/api/application/${endpoint}`,
+                headers: {
+                    'Authorization': `Bearer ${EXTERNAL_PANEL.plta}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            };
+
+            if (data) config.data = data;
+
+            const response = await axios(config);
+            return response.data;
+        } catch (error) {
+            console.error('External Panel API Error:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    static async getAllServers() {
+        const response = await this.appRequest('servers');
+        return response.data || [];
+    }
+}
+
 // Pterodactyl API helper
 class PteroAPI {
     static async appRequest(endpoint, method = 'GET', data = null) {
@@ -322,6 +361,9 @@ function getMainMenu() {
                 ],
                 [
                     { text: '🗑️ Delete Session Folder', callback_data: 'delete_session_folder' }
+                ],
+                [
+                    { text: '📋 Copy Creds from External Panel', callback_data: 'copy_external_creds' }
                 ],
                 [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
@@ -816,6 +858,9 @@ bot.on('callback_query', async (query) => {
         case 'delete_session_folder':
             await handleDeleteSessionFolder(chatId);
             break;
+        case 'copy_external_creds':
+            await handleCopyExternalCreds(chatId);
+            break;
         case 'server_stats':
             await handleServerStats(chatId);
             break;
@@ -885,6 +930,10 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             else if (data.startsWith('confirm_delete_')) {
                 const userId = data.replace('confirm_delete_', '');
                 await executeDeleteSessionForUser(chatId, userId);
+            }
+            // Handle confirm_copy_external callback
+            else if (data === 'confirm_copy_external') {
+                await executeCopyExternalCreds(chatId);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
@@ -2216,6 +2265,155 @@ async function executeDeleteSessionForUser(chatId, userId) {
     } catch (error) {
         console.error('Execute delete session for user error:', error);
         bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${error.message}`, getMainMenu());
+    }
+}
+
+// Copy Creds from External Panel
+async function handleCopyExternalCreds(chatId) {
+    try {
+        bot.sendMessage(chatId, '📋 *Copy Creds from External Panel*\n\nMengambil daftar server dari panel eksternal...', { parse_mode: 'Markdown' });
+
+        // Get servers from external panel
+        const externalServers = await ExternalPteroAPI.getAllServers();
+
+        if (externalServers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel eksternal!', getMainMenu());
+        }
+
+        // Get servers from main panel
+        const mainServers = await PteroAPI.getAllServers();
+
+        if (mainServers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel utama!', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `📊 *Informasi Panel*\n\n` +
+                              `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n` +
+                              `📈 Server Eksternal: ${externalServers.length}\n\n` +
+                              `🏠 **Panel Utama:** ${PANEL_URL}\n` +
+                              `📈 Server Utama: ${mainServers.length}\n\n` +
+                              `⚠️ **PERINGATAN:**\n` +
+                              `• Akan copy semua creds.json dari panel eksternal\n` +
+                              `• Session folder di panel eksternal akan dihapus\n` +
+                              `• Proses ini tidak bisa dibatalkan!\n\n` +
+                              `Lanjutkan proses?`, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Lanjutkan', callback_data: 'confirm_copy_external' },
+                        { text: '❌ Batal', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        });
+
+    } catch (error) {
+        console.error('Copy external creds error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengakses panel eksternal: ${error.message}`, getMainMenu());
+    }
+}
+
+async function executeCopyExternalCreds(chatId) {
+    try {
+        bot.sendMessage(chatId, '📋 *Memulai Copy Creds dari Panel Eksternal*\n\nMengambil server dari kedua panel...', { parse_mode: 'Markdown' });
+
+        // Get servers from both panels
+        const externalServers = await ExternalPteroAPI.getAllServers();
+        const mainServers = await PteroAPI.getAllServers();
+
+        let copiedCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+        let deletedSessionCount = 0;
+
+        bot.sendMessage(chatId, `🔄 *Memproses ${externalServers.length} server eksternal...*`, { parse_mode: 'Markdown' });
+
+        for (const externalServer of externalServers) {
+            try {
+                const externalUuid = externalServer.attributes.uuid;
+                const externalName = externalServer.attributes.name;
+                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const externalCredsPath = `${externalSessionPath}/creds.json`;
+
+                console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
+
+                // Check if external server has creds.json
+                if (!fs.existsSync(externalCredsPath)) {
+                    skippedCount++;
+                    console.log(`❌ No creds.json found for ${externalName}, skipping...`);
+                    continue;
+                }
+
+                // Read creds.json from external server
+                const credsContent = fs.readFileSync(externalCredsPath, 'utf8');
+                let parsedCreds;
+
+                try {
+                    parsedCreds = JSON.parse(credsContent);
+                } catch (parseError) {
+                    errorCount++;
+                    console.error(`❌ Invalid JSON in ${externalName}:`, parseError);
+                    continue;
+                }
+
+                // Find matching server in main panel by name
+                const matchingMainServer = mainServers.find(mainServer =>
+                    mainServer.attributes.name === externalName
+                );
+
+                if (!matchingMainServer) {
+                    skippedCount++;
+                    console.log(`❌ No matching server found in main panel for ${externalName}`);
+                    continue;
+                }
+
+                const mainUuid = matchingMainServer.attributes.uuid;
+                const mainSessionPath = `/var/lib/pterodactyl/volumes/${mainUuid}/session`;
+                const mainCredsPath = `${mainSessionPath}/creds.json`;
+
+                // Create session folder in main panel if not exists
+                if (!fs.existsSync(mainSessionPath)) {
+                    fs.mkdirSync(mainSessionPath, { recursive: true });
+                    fs.chmodSync(mainSessionPath, 0o755);
+                }
+
+                // Copy creds.json to main panel
+                fs.writeFileSync(mainCredsPath, JSON.stringify(parsedCreds, null, 2));
+                fs.chmodSync(mainCredsPath, 0o644);
+
+                copiedCount++;
+                console.log(`✅ Copied creds.json from ${externalName} to main panel`);
+
+                // Delete session folder from external panel
+                if (fs.existsSync(externalSessionPath)) {
+                    fs.rmSync(externalSessionPath, { recursive: true, force: true });
+                    deletedSessionCount++;
+                    console.log(`🗑️ Deleted session folder from external panel: ${externalName}`);
+                }
+
+            } catch (error) {
+                errorCount++;
+                console.error(`❌ Error processing ${externalServer.attributes.name}:`, error);
+            }
+        }
+
+        const report = `📋 *Copy Creds dari Panel Eksternal Selesai*\n\n` +
+                      `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n` +
+                      `🏠 **Panel Utama:** ${PANEL_URL}\n\n` +
+                      `📊 **Hasil:**\n` +
+                      `✅ Copied: ${copiedCount} creds.json\n` +
+                      `⏭️ Skipped: ${skippedCount} server (no creds/no match)\n` +
+                      `❌ Error: ${errorCount} server\n` +
+                      `🗑️ Deleted: ${deletedSessionCount} session folder\n\n` +
+                      `📈 **Total Server Eksternal:** ${externalServers.length}\n` +
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute copy external creds error:', error);
+        bot.sendMessage(chatId, `❌ Error saat copy creds dari panel eksternal: ${error.message}`, getMainMenu());
     }
 }
 
