@@ -1058,9 +1058,15 @@ Selamat datang! Pilih aksi yang diinginkan:`;
                 const userId = data.replace('confirm_delete_', '');
                 await executeDeleteSessionForUser(chatId, userId);
             }
+            // Handle copy_external_user callback
+            else if (data.startsWith('copy_external_user_')) {
+                const userId = data.replace('copy_external_user_', '');
+                await handleCopyExternalCredsForUser(chatId, userId);
+            }
             // Handle confirm_copy_external callback
-            else if (data === 'confirm_copy_external') {
-                await executeCopyExternalCreds(chatId);
+            else if (data.startsWith('confirm_copy_external_user_')) {
+                const userId = data.replace('confirm_copy_external_user_', '');
+                await executeCopyExternalCredsForUser(chatId, userId);
             }
             // Handle delete_external_sessions callback
             else if (data === 'delete_external_sessions') {
@@ -2414,41 +2420,40 @@ async function handleCopyExternalCreds(chatId) {
             return bot.sendMessage(chatId, '❌ Gagal terhubung ke panel eksternal!\n\nPeriksa konfigurasi API key dan domain.', getMainMenu());
         }
 
-        bot.sendMessage(chatId, '✅ Koneksi berhasil! Mengambil daftar server...', { parse_mode: 'Markdown' });
+        // Get users from main panel for selection
+        const users = await PteroAPI.getAllUsers();
 
-        // Get servers from external panel
-        const externalServers = await ExternalPteroAPI.getAllServers();
-
-        if (externalServers.length === 0) {
-            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel eksternal!', getMainMenu());
+        if (users.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada user ditemukan di panel utama!', getMainMenu());
         }
 
-        // Get servers from main panel
-        const mainServers = await PteroAPI.getAllServers();
+        let message = '👥 *Pilih User untuk Copy Creds*\n\n';
+        message += '📋 Pilih user yang akan menerima creds.json dari panel eksternal:\n\n';
 
-        if (mainServers.length === 0) {
-            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel utama!', getMainMenu());
+        const keyboard = [];
+        const maxUsersPerPage = 10;
+        const usersToShow = users.slice(0, maxUsersPerPage);
+
+        for (const user of usersToShow) {
+            const userInfo = user.attributes;
+            const username = userInfo.username || userInfo.first_name || `User-${userInfo.id}`;
+            const email = userInfo.email || 'No email';
+
+            keyboard.push([{
+                text: `👤 ${username} (${email})`,
+                callback_data: `copy_external_user_${userInfo.id}`
+            }]);
         }
 
-        bot.sendMessage(chatId, `📊 *Informasi Panel*\n\n` +
-                              `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n` +
-                              `📈 Server Eksternal: ${externalServers.length}\n\n` +
-                              `🏠 **Panel Utama:** ${PANEL_URL}\n` +
-                              `📈 Server Utama: ${mainServers.length}\n\n` +
-                              `⚠️ **PERINGATAN:**\n` +
-                              `• Akan copy semua creds.json dari panel eksternal\n` +
-                              `• Session folder di panel eksternal akan dihapus\n` +
-                              `• Proses ini tidak bisa dibatalkan!\n\n` +
-                              `Lanjutkan proses?`, {
+        if (users.length > maxUsersPerPage) {
+            message += `\n📊 Menampilkan ${maxUsersPerPage} dari ${users.length} user`;
+        }
+
+        keyboard.push([{ text: '🔙 Kembali', callback_data: 'main_menu' }]);
+
+        bot.sendMessage(chatId, message, {
             parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: '✅ Ya, Lanjutkan', callback_data: 'confirm_copy_external' },
-                        { text: '❌ Batal', callback_data: 'main_menu' }
-                    ]
-                ]
-            }
+            reply_markup: { inline_keyboard: keyboard }
         });
 
     } catch (error) {
@@ -2567,6 +2572,188 @@ async function executeDeleteExternalSessions(chatId) {
     }
 }
 
+async function handleCopyExternalCredsForUser(chatId, userId) {
+    try {
+        // Get user info
+        const user = await PteroAPI.getUserById(userId);
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        const userInfo = user.attributes;
+        const username = userInfo.username || userInfo.first_name || `User-${userInfo.id}`;
+
+        // Get servers from external panel
+        const externalServers = await ExternalPteroAPI.getAllServers();
+
+        if (externalServers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel eksternal!', getMainMenu());
+        }
+
+        // Count servers with creds.json
+        let serversWithCreds = 0;
+        for (const server of externalServers) {
+            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            const credsPath = `${sessionPath}/creds.json`;
+
+            if (fs.existsSync(credsPath)) {
+                serversWithCreds++;
+            }
+        }
+
+        const confirmMessage = `📋 *Konfirmasi Copy Creds untuk User*\n\n` +
+                              `👤 **Target User:** ${username} (${userInfo.email})\n` +
+                              `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n` +
+                              `🏠 **Panel Utama:** ${PANEL_URL}\n\n` +
+                              `📊 **Server Eksternal:** ${externalServers.length}\n` +
+                              `📄 **Server dengan Creds:** ${serversWithCreds}\n\n` +
+                              `⚠️ **PERINGATAN:**\n` +
+                              `• Akan copy semua creds.json dari panel eksternal\n` +
+                              `• Creds akan ditaruh di server milik user ${username}\n` +
+                              `• Session folder di panel eksternal TIDAK akan dihapus\n\n` +
+                              `❓ Lanjutkan?`;
+
+        const confirmKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Copy untuk User Ini', callback_data: `confirm_copy_external_user_${userId}` },
+                        { text: '❌ Batal', callback_data: 'copy_external_creds' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, confirmMessage, { parse_mode: 'Markdown', ...confirmKeyboard });
+
+    } catch (error) {
+        console.error('Handle copy external creds for user error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+    }
+}
+
+async function executeCopyExternalCredsForUser(chatId, userId) {
+    try {
+        bot.sendMessage(chatId, '🔄 *Memulai Copy Creds dari Panel Eksternal*\n\nMengambil daftar server...', { parse_mode: 'Markdown' });
+
+        // Get user info
+        const user = await PteroAPI.getUserById(userId);
+        const userInfo = user.attributes;
+        const username = userInfo.username || userInfo.first_name || `User-${userInfo.id}`;
+
+        // Get servers from both panels
+        const externalServers = await ExternalPteroAPI.getAllServers();
+        const mainServers = await PteroAPI.getAllServers();
+
+        // Filter main servers by user
+        const userServers = mainServers.filter(server =>
+            server.attributes.user === parseInt(userId)
+        );
+
+        console.log(`📊 External panel servers: ${externalServers.length}`);
+        console.log(`📊 Main panel servers for user ${username}: ${userServers.length}`);
+
+        let copiedCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        bot.sendMessage(chatId, `🔄 *Memproses ${externalServers.length} server eksternal...*\n*Target: ${userServers.length} server milik ${username}*`, { parse_mode: 'Markdown' });
+
+        for (const externalServer of externalServers) {
+            try {
+                const externalUuid = externalServer.attributes.uuid;
+                const externalName = externalServer.attributes.name;
+                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const externalCredsPath = `${externalSessionPath}/creds.json`;
+
+                console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
+
+                // Check if external server has creds.json
+                let credsFound = false;
+                let actualCredsPath = externalCredsPath;
+
+                // Try different possible locations for creds.json
+                const possiblePaths = [
+                    externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/session/creds.json
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/creds.json`, // Direct in volume
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/session/plugins/creds.json`, // In plugins folder
+                ];
+
+                for (const path of possiblePaths) {
+                    if (fs.existsSync(path)) {
+                        credsFound = true;
+                        actualCredsPath = path;
+                        console.log(`✅ Found creds.json at: ${path}`);
+                        break;
+                    }
+                }
+
+                if (!credsFound) {
+                    skippedCount++;
+                    console.log(`❌ No creds.json found for ${externalName}`);
+                    continue;
+                }
+
+                // Find available server from user's servers
+                if (userServers.length === 0) {
+                    skippedCount++;
+                    console.log(`❌ No servers available for user ${username}`);
+                    continue;
+                }
+
+                // Use round-robin to distribute creds across user's servers
+                const targetServerIndex = copiedCount % userServers.length;
+                const targetServer = userServers[targetServerIndex];
+                const targetUuid = targetServer.attributes.uuid;
+                const targetName = targetServer.attributes.name;
+
+                // Read creds.json from external server
+                const credsContent = fs.readFileSync(actualCredsPath, 'utf8');
+
+                // Validate JSON
+                JSON.parse(credsContent);
+
+                // Create target paths
+                const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/session`;
+                const targetCredsPath = `${targetSessionPath}/creds.json`;
+
+                // Create session directory if it doesn't exist
+                if (!fs.existsSync(targetSessionPath)) {
+                    fs.mkdirSync(targetSessionPath, { recursive: true, mode: 0o755 });
+                }
+
+                // Write creds.json to target server
+                fs.writeFileSync(targetCredsPath, credsContent, { mode: 0o644 });
+
+                copiedCount++;
+                console.log(`✅ Copied creds.json from ${externalName} to ${targetName} (${username})`);
+
+            } catch (error) {
+                errorCount++;
+                console.error(`❌ Error processing ${externalServer.attributes.name}:`, error);
+            }
+        }
+
+        const report = `📋 *Copy Creds untuk User Selesai*\n\n` +
+                      `👤 **Target User:** ${username} (${userInfo.email})\n` +
+                      `🌐 **Panel Eksternal:** ${EXTERNAL_PANEL.domain}\n` +
+                      `🏠 **Panel Utama:** ${PANEL_URL}\n\n` +
+                      `📊 **Hasil:**\n` +
+                      `✅ Copied: ${copiedCount} creds.json\n` +
+                      `⏭️ Skipped: ${skippedCount} server (no creds)\n` +
+                      `❌ Error: ${errorCount} server\n\n` +
+                      `📈 **Total Server Eksternal:** ${externalServers.length}\n` +
+                      `🎯 **Server Target User:** ${userServers.length}\n` +
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute copy external creds for user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat copy creds untuk user: ${error.message}`, getMainMenu());
+    }
+}
+
 async function executeCopyExternalCreds(chatId) {
     try {
         bot.sendMessage(chatId, '📋 *Memulai Copy Creds dari Panel Eksternal*\n\nMengambil server dari kedua panel...', { parse_mode: 'Markdown' });
@@ -2600,9 +2787,28 @@ async function executeCopyExternalCreds(chatId) {
                 console.log(`📄 Creds file exists: ${fs.existsSync(externalCredsPath)}`);
 
                 // Check if external server has creds.json
-                if (!fs.existsSync(externalCredsPath)) {
+                let credsFound = false;
+                let actualCredsPath = externalCredsPath;
+
+                // Try different possible locations for creds.json
+                const possiblePaths = [
+                    externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/session/creds.json
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/creds.json`, // Direct in volume
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/session/plugins/creds.json`, // In plugins folder
+                ];
+
+                for (const path of possiblePaths) {
+                    if (fs.existsSync(path)) {
+                        credsFound = true;
+                        actualCredsPath = path;
+                        console.log(`✅ Found creds.json at: ${path}`);
+                        break;
+                    }
+                }
+
+                if (!credsFound) {
                     skippedCount++;
-                    console.log(`❌ No creds.json found for ${externalName} at ${externalCredsPath}, skipping...`);
+                    console.log(`❌ No creds.json found for ${externalName}, tried paths:`, possiblePaths);
 
                     // List what's actually in the session folder
                     if (fs.existsSync(externalSessionPath)) {
@@ -2617,7 +2823,7 @@ async function executeCopyExternalCreds(chatId) {
                 }
 
                 // Read creds.json from external server
-                const credsContent = fs.readFileSync(externalCredsPath, 'utf8');
+                const credsContent = fs.readFileSync(actualCredsPath, 'utf8');
                 let parsedCreds;
 
                 try {
