@@ -9,6 +9,8 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 // Import Rose Bot modules
 const AdminModule = require('./modules/admin');
@@ -282,6 +284,10 @@ function getMainMenu() {
                 [
                     { text: '⚡ Optimasi Panel', callback_data: 'optimize_panel' },
                     { text: '🛠️ Kelola Server', callback_data: 'manage_servers' }
+                ],
+                [
+                    { text: '📁 Auto Session Folder', callback_data: 'auto_session_folder' },
+                    { text: '🔑 Auto Creds.json', callback_data: 'auto_creds_json' }
                 ],
                 [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
@@ -722,6 +728,26 @@ bot.onText(/\/createserver (\d+) (\d+)/, async (msg, match) => {
     await executeCreateServers(chatId, targetUserId, quantity);
 });
 
+// Handle text messages (for creds.json input)
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    // Skip if not owner
+    if (!isOwner(userId)) return;
+
+    // Skip if it's a command
+    if (msg.text && msg.text.startsWith('/')) return;
+
+    // Skip if it's not a text message
+    if (!msg.text) return;
+
+    // Check if user is waiting for creds.json input
+    if (waitingForCredsJson.has(chatId)) {
+        await processCredsJsonInput(chatId, msg.text);
+    }
+});
+
 // Handle callback queries
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
@@ -746,6 +772,12 @@ bot.on('callback_query', async (query) => {
             break;
         case 'manage_servers':
             await handleManageServers(chatId);
+            break;
+        case 'auto_session_folder':
+            await handleAutoSessionFolder(chatId);
+            break;
+        case 'auto_creds_json':
+            await handleAutoCredsJson(chatId);
             break;
         case 'server_stats':
             await handleServerStats(chatId);
@@ -1703,6 +1735,187 @@ async function executeCreateServers(chatId, userId, quantity) {
     } catch (error) {
         console.error('Execute create servers error:', error);
         bot.sendMessage(chatId, `❌ Error saat membuat server: ${error.message}`, getMainMenu());
+    }
+}
+
+// Auto Session Folder Management
+async function handleAutoSessionFolder(chatId) {
+    try {
+        bot.sendMessage(chatId, '📁 *Auto Session Folder*\n\nMengambil daftar server...', { parse_mode: 'Markdown' });
+
+        const servers = await PteroAPI.getAllServers();
+
+        if (servers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan!', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `📊 Ditemukan ${servers.length} server. Memulai proses pembuatan folder session...`);
+
+        let createdCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        for (const server of servers) {
+            try {
+                const serverName = server.attributes.name;
+                const serverUuid = server.attributes.uuid;
+
+                // Create session folder path
+                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+
+                // Check if session folder already exists
+                if (fs.existsSync(sessionPath)) {
+                    skippedCount++;
+                    console.log(`Session folder already exists for ${serverName}, skipping...`);
+                    continue;
+                }
+
+                // Create session folder
+                fs.mkdirSync(sessionPath, { recursive: true });
+                fs.chmodSync(sessionPath, 0o755);
+
+                createdCount++;
+                console.log(`Created session folder for ${serverName}`);
+
+            } catch (error) {
+                errorCount++;
+                console.error(`Error creating session folder for ${server.attributes.name}:`, error);
+            }
+        }
+
+        const report = `📁 *Auto Session Folder Selesai*\n\n` +
+                      `📊 **Hasil:**\n` +
+                      `✅ Dibuat: ${createdCount} folder\n` +
+                      `⏭️ Dilewati: ${skippedCount} folder (sudah ada)\n` +
+                      `❌ Error: ${errorCount} folder\n\n` +
+                      `📈 **Total Server:** ${servers.length}\n` +
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Auto session folder error:', error);
+        bot.sendMessage(chatId, `❌ Error saat membuat session folder: ${error.message}`, getMainMenu());
+    }
+}
+
+// Auto Creds.json Management
+let waitingForCredsJson = new Map(); // Store users waiting for creds.json input
+
+async function handleAutoCredsJson(chatId) {
+    try {
+        bot.sendMessage(chatId, '🔑 *Auto Creds.json*\n\nMengambil daftar server...', { parse_mode: 'Markdown' });
+
+        const servers = await PteroAPI.getAllServers();
+
+        if (servers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan!', getMainMenu());
+        }
+
+        // Check how many servers need creds.json
+        let needCredsCount = 0;
+
+        for (const server of servers) {
+            const serverUuid = server.attributes.uuid;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+            const credsPath = `${sessionPath}/creds.json`;
+
+            if (fs.existsSync(sessionPath) && !fs.existsSync(credsPath)) {
+                needCredsCount++;
+            }
+        }
+
+        if (needCredsCount === 0) {
+            return bot.sendMessage(chatId, '✅ Semua server sudah memiliki creds.json atau tidak memiliki folder session!', getMainMenu());
+        }
+
+        const text = `🔑 *Auto Creds.json*\n\n` +
+                    `📊 Ditemukan ${servers.length} server total\n` +
+                    `📁 ${needCredsCount} server membutuhkan creds.json\n\n` +
+                    `📝 Silakan kirim konten creds.json Anda:`;
+
+        // Set user as waiting for creds.json input
+        waitingForCredsJson.set(chatId, { servers, needCredsCount });
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+
+    } catch (error) {
+        console.error('Auto creds.json error:', error);
+        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${error.message}`, getMainMenu());
+    }
+}
+
+async function processCredsJsonInput(chatId, credsContent) {
+    try {
+        const waitingData = waitingForCredsJson.get(chatId);
+        if (!waitingData) {
+            return; // User not waiting for creds.json input
+        }
+
+        // Remove user from waiting list
+        waitingForCredsJson.delete(chatId);
+
+        // Validate JSON
+        let parsedCreds;
+        try {
+            parsedCreds = JSON.parse(credsContent);
+        } catch (error) {
+            return bot.sendMessage(chatId, '❌ Format JSON tidak valid! Silakan coba lagi dengan format JSON yang benar.', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🔑 *Memproses Creds.json*\n\nMemulai penambahan creds.json ke ${waitingData.needCredsCount} server...`, { parse_mode: 'Markdown' });
+
+        let createdCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        for (const server of waitingData.servers) {
+            try {
+                const serverName = server.attributes.name;
+                const serverUuid = server.attributes.uuid;
+                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+                const credsPath = `${sessionPath}/creds.json`;
+
+                // Check if session folder exists
+                if (!fs.existsSync(sessionPath)) {
+                    skippedCount++;
+                    console.log(`Session folder not found for ${serverName}, skipping...`);
+                    continue;
+                }
+
+                // Check if creds.json already exists
+                if (fs.existsSync(credsPath)) {
+                    skippedCount++;
+                    console.log(`Creds.json already exists for ${serverName}, skipping...`);
+                    continue;
+                }
+
+                // Create creds.json file
+                fs.writeFileSync(credsPath, JSON.stringify(parsedCreds, null, 2));
+                fs.chmodSync(credsPath, 0o644);
+
+                createdCount++;
+                console.log(`Created creds.json for ${serverName}`);
+
+            } catch (error) {
+                errorCount++;
+                console.error(`Error creating creds.json for ${server.attributes.name}:`, error);
+            }
+        }
+
+        const report = `🔑 *Auto Creds.json Selesai*\n\n` +
+                      `📊 **Hasil:**\n` +
+                      `✅ Dibuat: ${createdCount} file\n` +
+                      `⏭️ Dilewati: ${skippedCount} file (sudah ada/tidak ada session)\n` +
+                      `❌ Error: ${errorCount} file\n\n` +
+                      `📈 **Total Server:** ${waitingData.servers.length}\n` +
+                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Process creds.json input error:', error);
+        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${error.message}`, getMainMenu());
     }
 }
 

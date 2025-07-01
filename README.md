@@ -119,6 +119,8 @@ LOG_MAX_FILES=5
 - **User Management**: Create users, manage permissions
 - **Panel Optimization**: Performance tuning and monitoring
 - **Health Checks**: System diagnostics and status
+- **Auto Session Folder**: Automatically create session folders for all servers
+- **Auto Creds.json**: Bulk add credentials to servers that need them
 
 ### 🔧 Management
 
@@ -276,6 +278,8 @@ LOG_MAX_FILES=5
 - **Manajemen User**: Buat user, kelola permission
 - **Optimasi Panel**: Tuning performa dan monitoring
 - **Health Check**: Diagnostik sistem dan status
+- **Auto Session Folder**: Otomatis buat folder session untuk semua server
+- **Auto Creds.json**: Bulk tambah kredensial ke server yang membutuhkan
 
 ### 🔧 Manajemen
 
