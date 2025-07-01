@@ -2454,12 +2454,17 @@ async function executeCopyExternalCreds(chatId) {
         const externalServers = await ExternalPteroAPI.getAllServers();
         const mainServers = await PteroAPI.getAllServers();
 
+        console.log(`📊 External panel servers: ${externalServers.length}`);
+        console.log(`📊 Main panel servers: ${mainServers.length}`);
+        console.log(`📋 Sample external servers:`, externalServers.slice(0, 3).map(s => ({ name: s.attributes.name, uuid: s.attributes.uuid })));
+        console.log(`📋 Sample main servers:`, mainServers.slice(0, 3).map(s => ({ name: s.attributes.name, uuid: s.attributes.uuid })));
+
         let copiedCount = 0;
         let skippedCount = 0;
         let errorCount = 0;
         let deletedSessionCount = 0;
 
-        bot.sendMessage(chatId, `🔄 *Memproses ${externalServers.length} server eksternal...*`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `🔄 *Memproses ${externalServers.length} server eksternal...*\n*Panel utama memiliki ${mainServers.length} server*`, { parse_mode: 'Markdown' });
 
         for (const externalServer of externalServers) {
             try {
@@ -2469,11 +2474,24 @@ async function executeCopyExternalCreds(chatId) {
                 const externalCredsPath = `${externalSessionPath}/creds.json`;
 
                 console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
+                console.log(`📁 Checking path: ${externalCredsPath}`);
+                console.log(`📂 Session path exists: ${fs.existsSync(externalSessionPath)}`);
+                console.log(`📄 Creds file exists: ${fs.existsSync(externalCredsPath)}`);
 
                 // Check if external server has creds.json
                 if (!fs.existsSync(externalCredsPath)) {
                     skippedCount++;
-                    console.log(`❌ No creds.json found for ${externalName}, skipping...`);
+                    console.log(`❌ No creds.json found for ${externalName} at ${externalCredsPath}, skipping...`);
+
+                    // List what's actually in the session folder
+                    if (fs.existsSync(externalSessionPath)) {
+                        try {
+                            const sessionContents = fs.readdirSync(externalSessionPath);
+                            console.log(`📋 Session folder contents for ${externalName}:`, sessionContents);
+                        } catch (listError) {
+                            console.log(`❌ Cannot list session folder for ${externalName}:`, listError.message);
+                        }
+                    }
                     continue;
                 }
 
@@ -2490,15 +2508,21 @@ async function executeCopyExternalCreds(chatId) {
                 }
 
                 // Find matching server in main panel by name
+                console.log(`🔍 Looking for matching server in main panel for: "${externalName}"`);
+                console.log(`📊 Main panel has ${mainServers.length} servers`);
+
                 const matchingMainServer = mainServers.find(mainServer =>
                     mainServer.attributes.name === externalName
                 );
 
                 if (!matchingMainServer) {
                     skippedCount++;
-                    console.log(`❌ No matching server found in main panel for ${externalName}`);
+                    console.log(`❌ No matching server found in main panel for "${externalName}"`);
+                    console.log(`📋 Available main panel servers:`, mainServers.slice(0, 5).map(s => s.attributes.name));
                     continue;
                 }
+
+                console.log(`✅ Found matching server: "${matchingMainServer.attributes.name}" (${matchingMainServer.attributes.uuid})`);
 
                 const mainUuid = matchingMainServer.attributes.uuid;
                 const mainSessionPath = `/var/lib/pterodactyl/volumes/${mainUuid}/session`;
