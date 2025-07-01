@@ -279,6 +279,11 @@ class PteroAPI {
         return response.data || [];
     }
 
+    static async getUserById(userId) {
+        const response = await this.appRequest(`users/${userId}`);
+        return response;
+    }
+
     static async getUserInfo(userId) {
         const response = await this.appRequest(`users/${userId}`);
         console.log('👤 User API Response:', JSON.stringify(response, null, 2));
