@@ -52,11 +52,11 @@ console.log('🌹 Rose Bot Features: Loaded!');
 
 // External Panel Configuration
 const EXTERNAL_PANEL = {
-    domain: 'https://panel.hostkita.xyz',
-    plta: 'ptla_08YUzroThsNHieSGRiXFTwhenov385SX3y41vB5wL9Z',
-    pltc: 'ptlc_2uHOQZzoz4TbWMfo3uvxmGyEHarU0MMzLuXs8b4Jbje',
+    domain: 'https://panel-one.ndikafath.com',
+    plta: 'ptla_a7BlBCHL3092q9UtkoIldTYc7M93DgO32CCwa8drj8p',
+    pltc: 'ptlc_zncHawiTRh8rj8XCt97VOArbgPfOjCxdnjPWheENWap',
     loc: '1',
-    eggs: '1'
+    eggs: '15'
 };
 
 // External Panel API helper
