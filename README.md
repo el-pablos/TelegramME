@@ -154,7 +154,7 @@ node health.js
 │                                 │
 │  👤 Name:      Pablos           │
 │  🆔 User ID:   5476148500       │
-│  📱 Username:  @ImTamaa         │
+│  📱 Username:  @ImTamaa   ta      │
 │  🌐 DC ID:     2                │
 │  💎 Premium:   No               │
 │                                 │

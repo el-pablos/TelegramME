@@ -22,6 +22,36 @@ const LocksModule = require('./modules/locks');
 // Global variables for state tracking
 const setorCredsState = new Map(); // Track setor creds upload state
 
+// Helper function to check if panel is blacklisted
+function isPanelBlacklisted(panelUrl) {
+    try {
+        const url = new URL(panelUrl);
+        const hostname = url.hostname;
+        return PANEL_BLACKLIST.some(blacklisted =>
+            hostname.includes(blacklisted) || blacklisted.includes(hostname)
+        );
+    } catch (error) {
+        console.error('Error checking panel blacklist:', error);
+        return false;
+    }
+}
+
+// Helper function to clean JSON content (remove line numbers)
+function cleanJsonContent(content) {
+    try {
+        // Remove line numbers at the beginning (like "1{" -> "{")
+        const cleaned = content.replace(/^\d+/, '').trim();
+
+        // Validate it's still valid JSON
+        JSON.parse(cleaned);
+
+        return cleaned;
+    } catch (error) {
+        console.error('Error cleaning JSON content:', error);
+        return content; // Return original if cleaning fails
+    }
+}
+
 // Configuration
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_TELEGRAM_ID);
@@ -61,6 +91,13 @@ const EXTERNAL_PANEL = {
     loc: '1',
     eggs: '15'
 };
+
+// Panel Blacklist - Panel yang tidak boleh digunakan
+const PANEL_BLACKLIST = [
+    'panel.hostkita.xyz',
+    'panel-blocked.example.com',
+    // Tambahkan domain panel yang ingin diblacklist
+];
 
 // External Panel API helper
 class ExternalPteroAPI {
@@ -502,6 +539,9 @@ function getMainMenu() {
                 ],
                 [
                     { text: '📤 Setor Creds (Upload JSON Files)', callback_data: 'setor_creds' }
+                ],
+                [
+                    { text: '🚫 Manage Panel Blacklist', callback_data: 'manage_blacklist' }
                 ],
                 [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
@@ -1108,6 +1148,10 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             // Handle setor_creds_cancel callback
             else if (data === 'setor_creds_cancel') {
                 await handleSetorCredsCancel(chatId);
+            }
+            // Handle manage_blacklist callback
+            else if (data === 'manage_blacklist') {
+                await handleManageBlacklist(chatId);
             }
             // Handle creds_server_ callbacks
             else if (data.startsWith('creds_server_')) {
@@ -2021,6 +2065,11 @@ async function executeCreateServers(chatId, userId, quantity) {
 // Auto Session Folder Management
 async function handleAutoSessionFolder(chatId) {
     try {
+        // Check if main panel is blacklisted
+        if (isPanelBlacklisted(PANEL_URL)) {
+            return bot.sendMessage(chatId, `❌ *Panel Diblacklist*\n\nPanel ${PANEL_URL} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
         bot.sendMessage(chatId, '📁 *Auto Session Folder*\n\nMengambil daftar user...', { parse_mode: 'Markdown' });
 
         // Get all users first
@@ -2287,6 +2336,11 @@ async function processCredsJsonInput(chatId, credsContent) {
 // Delete Session Folder Management
 async function handleDeleteSessionFolder(chatId) {
     try {
+        // Check if main panel is blacklisted
+        if (isPanelBlacklisted(PANEL_URL)) {
+            return bot.sendMessage(chatId, `❌ *Panel Diblacklist*\n\nPanel ${PANEL_URL} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
         bot.sendMessage(chatId, '🗑️ *Delete Session Folder*\n\nMengambil daftar user...', { parse_mode: 'Markdown' });
 
         // Get all users first
@@ -2445,6 +2499,16 @@ async function executeDeleteSessionForUser(chatId, userId) {
 // Copy Creds from External Panel
 async function handleCopyExternalCreds(chatId) {
     try {
+        // Check if external panel is blacklisted
+        if (isPanelBlacklisted(EXTERNAL_PANEL.domain)) {
+            return bot.sendMessage(chatId, `❌ *Panel Eksternal Diblacklist*\n\nPanel ${EXTERNAL_PANEL.domain} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
+        // Check if main panel is blacklisted
+        if (isPanelBlacklisted(PANEL_URL)) {
+            return bot.sendMessage(chatId, `❌ *Panel Utama Diblacklist*\n\nPanel ${PANEL_URL} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
         bot.sendMessage(chatId, '📋 *Copy Creds from External Panel*\n\nTesting koneksi ke panel eksternal...', { parse_mode: 'Markdown' });
 
         // Test external panel connection first
@@ -2498,6 +2562,11 @@ async function handleCopyExternalCreds(chatId) {
 // Delete Session Folders from External Panel
 async function handleDeleteExternalSessions(chatId) {
     try {
+        // Check if external panel is blacklisted
+        if (isPanelBlacklisted(EXTERNAL_PANEL.domain)) {
+            return bot.sendMessage(chatId, `❌ *Panel Eksternal Diblacklist*\n\nPanel ${EXTERNAL_PANEL.domain} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
         bot.sendMessage(chatId, '🗑️ *Delete Session Folders dari Panel Eksternal*\n\nTesting koneksi ke panel eksternal...', { parse_mode: 'Markdown' });
 
         // Test external panel connection first
@@ -2763,8 +2832,9 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
                 const targetUuid = targetServer.attributes.uuid;
                 const targetName = targetServer.attributes.name;
 
-                // Read creds.json from external server
-                const credsContent = fs.readFileSync(actualCredsPath, 'utf8');
+                // Read and clean JSON from external server
+                const rawCredsContent = fs.readFileSync(actualCredsPath, 'utf8');
+                const credsContent = cleanJsonContent(rawCredsContent);
 
                 // Validate JSON
                 JSON.parse(credsContent);
@@ -2813,6 +2883,11 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
 // Setor Creds - Upload Multiple JSON Files
 async function handleSetorCreds(chatId) {
     try {
+        // Check if main panel is blacklisted
+        if (isPanelBlacklisted(PANEL_URL)) {
+            return bot.sendMessage(chatId, `❌ *Panel Diblacklist*\n\nPanel ${PANEL_URL} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
         // Get all servers to check availability
         const servers = await PteroAPI.getAllServers();
 
@@ -2912,10 +2987,11 @@ async function handleSetorCredsUpload(chatId, msg) {
         const response = await axios.get(fileLink, { responseType: 'text' });
         const fileContent = response.data;
 
-        // Validate JSON
+        // Clean and validate JSON
         let jsonData;
         try {
-            jsonData = JSON.parse(fileContent);
+            const cleanedContent = cleanJsonContent(fileContent);
+            jsonData = JSON.parse(cleanedContent);
         } catch (parseError) {
             return bot.sendMessage(chatId, `❌ *File JSON Tidak Valid*\n\nFile: ${fileName}\nError: ${parseError.message}\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
         }
@@ -3041,6 +3117,53 @@ async function handleSetorCredsCancel(chatId) {
     }
 }
 
+// Manage Panel Blacklist
+async function handleManageBlacklist(chatId) {
+    try {
+        let message = `🚫 *Manage Panel Blacklist*\n\n`;
+        message += `📋 **Panel yang Diblacklist:**\n`;
+
+        if (PANEL_BLACKLIST.length === 0) {
+            message += `✅ Tidak ada panel yang diblacklist\n\n`;
+        } else {
+            for (let i = 0; i < PANEL_BLACKLIST.length; i++) {
+                message += `${i + 1}. ${PANEL_BLACKLIST[i]}\n`;
+            }
+            message += `\n`;
+        }
+
+        message += `🔍 **Status Panel Saat Ini:**\n`;
+        message += `🏠 Panel Utama: ${PANEL_URL}\n`;
+        message += `   Status: ${isPanelBlacklisted(PANEL_URL) ? '🚫 DIBLACKLIST' : '✅ Diizinkan'}\n`;
+        message += `🌐 Panel Eksternal: ${EXTERNAL_PANEL.domain}\n`;
+        message += `   Status: ${isPanelBlacklisted(EXTERNAL_PANEL.domain) ? '🚫 DIBLACKLIST' : '✅ Diizinkan'}\n\n`;
+
+        message += `⚠️ **Catatan:**\n`;
+        message += `• Panel yang diblacklist tidak bisa digunakan untuk operasi apapun\n`;
+        message += `• Termasuk: Setor Creds, Copy Creds, Create Server, dll\n`;
+        message += `• Blacklist bersifat permanen sampai dihapus dari konfigurasi\n\n`;
+
+        message += `🛠️ **Untuk menambah/hapus blacklist, edit konfigurasi PANEL_BLACKLIST di bot.js**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Refresh Status', callback_data: 'manage_blacklist' },
+                        { text: '🔙 Kembali', callback_data: 'admin_panel' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+        console.error('Handle manage blacklist error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menampilkan blacklist: ${error.message}`, getMainMenu());
+    }
+}
+
 async function executeCopyExternalCreds(chatId) {
     try {
         bot.sendMessage(chatId, '📋 *Memulai Copy Creds dari Panel Eksternal*\n\nMengambil server dari kedua panel...', { parse_mode: 'Markdown' });
@@ -3132,8 +3255,9 @@ async function executeCopyExternalCreds(chatId) {
                     continue;
                 }
 
-                // Read creds.json from external server
-                const credsContent = fs.readFileSync(actualCredsPath, 'utf8');
+                // Read and clean JSON from external server
+                const rawCredsContent = fs.readFileSync(actualCredsPath, 'utf8');
+                const credsContent = cleanJsonContent(rawCredsContent);
                 let parsedCreds;
 
                 try {
