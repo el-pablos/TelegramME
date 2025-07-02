@@ -567,7 +567,7 @@ function getMainMenu() {
                     { text: '🗑️ Delete Session Folders (External Panel)', callback_data: 'delete_external_sessions' }
                 ],
                 [
-                    { text: '📤 Setor Creds (Upload JSON Files)', callback_data: 'setor_creds' }
+                    { text: '📤 Setor Sender (Upload JSON Files)', callback_data: 'setor_creds' }
                 ],
                 [
                     { text: '🚫 Manage Panel Blacklist', callback_data: 'manage_blacklist' }
@@ -2941,7 +2941,7 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
     }
 }
 
-// Setor Creds - Upload Multiple JSON Files
+// Setor Sender - Upload Multiple JSON Files
 async function handleSetorCreds(chatId) {
     try {
         // Check if main panel is blacklisted
@@ -2967,22 +2967,22 @@ async function handleSetorCreds(chatId) {
             }
         }
 
-        const message = `📤 *Setor Creds - Upload JSON Files*\n\n` +
+        const message = `📤 *Setor Sender - Upload JSON Files*\n\n` +
                        `📊 **Status Panel:**\n` +
                        `🏠 Panel Utama: ${PANEL_URL}\n` +
                        `📈 Total Server: ${servers.length}\n` +
-                       `🆓 Server Kosong (tanpa creds): ${availableServers}\n\n` +
+                       `🆓 Server Kosong (tanpa sender): ${availableServers}\n\n` +
                        `📋 **Cara Penggunaan:**\n` +
-                       `1️⃣ Kirim file JSON (nama bebas: jmbut.json, config.json, dll)\n` +
+                       `1️⃣ Kirim file JSON sender (nama bebas: sender1.json, config.json, dll)\n` +
                        `2️⃣ Bot akan auto-rename jadi creds.json\n` +
-                       `3️⃣ Auto-distribute ke server kosong (1 file = 1 server)\n` +
+                       `3️⃣ Auto-distribute ke server kosong (1 sender = 1 server)\n` +
                        `4️⃣ Kirim /done untuk selesai\n\n` +
                        `⚠️ **Catatan:**\n` +
                        `• Hanya file .json yang diterima\n` +
                        `• File akan di-validate sebagai JSON\n` +
-                       `• Tidak akan menimpa creds.json yang sudah ada\n` +
-                       `• Maksimal ${availableServers} file bisa diupload\n\n` +
-                       `📤 **Mulai upload file JSON Anda!**`;
+                       `• Tidak akan menimpa sender yang sudah ada\n` +
+                       `• Maksimal ${availableServers} sender bisa diupload\n\n` +
+                       `📤 **Mulai upload file JSON sender Anda!**`;
 
         // Set user to setor creds mode
         setorCredsState.set(chatId, {
@@ -3035,7 +3035,7 @@ async function handleSetorCredsUpload(chatId, msg) {
 
         // Check if we have available servers
         if (state.availableServers.length === 0) {
-            return bot.sendMessage(chatId, `❌ *Tidak Ada Server Kosong*\n\nSemua server sudah memiliki creds.json\nGunakan /done untuk menyelesaikan upload.`, { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, `❌ *Tidak Ada Server Kosong*\n\nSemua server sudah memiliki sender\nGunakan /done untuk menyelesaikan upload.`, { parse_mode: 'Markdown' });
         }
 
         // Check file size (max 20MB for Telegram Bot API)
@@ -3211,13 +3211,13 @@ async function handleSetorCredsUpload(chatId, msg) {
         // Update state in map
         setorCredsState.set(chatId, state);
 
-        const successMessage = `✅ *File Berhasil Diupload*\n\n` +
-                              `📄 **File:** ${originalFileName}\n` +
+        const successMessage = `✅ *Sender Berhasil Terkoneksi*\n\n` +
+                              `📄 **Sender:** ${originalFileName}\n` +
                               `🎯 **Target Server:** ${targetName}\n` +
                               `📁 **Disimpan sebagai:** creds.json\n` +
-                              `📊 **Progress:** ${state.uploadedFiles.length} file uploaded\n` +
+                              `📊 **Progress:** ${state.uploadedFiles.length} sender connected\n` +
                               `🆓 **Server Kosong Tersisa:** ${state.availableServers.length}\n\n` +
-                              `📤 **Lanjutkan upload file berikutnya atau klik Selesai**`;
+                              `📤 **Lanjutkan upload sender berikutnya atau klik Selesai**`;
 
         bot.sendMessage(chatId, successMessage, { parse_mode: 'Markdown' });
 
@@ -3258,26 +3258,26 @@ async function handleSetorCredsDone(chatId) {
             return bot.sendMessage(chatId, '📤 *Setor Creds Dibatalkan*\n\nTidak ada file yang diupload.', getMainMenu());
         }
 
-        let report = `✅ *Setor Creds Selesai*\n\n`;
+        let report = `✅ *Setor Sender Selesai*\n\n`;
         report += `📊 **Ringkasan:**\n`;
-        report += `📤 Total File Uploaded: ${uploadedCount}\n`;
+        report += `📤 Total Sender connected: ${uploadedCount}\n`;
         report += `⏱️ Durasi: ${duration} detik\n`;
         report += `⏰ Selesai: ${new Date().toLocaleString('id-ID')}\n\n`;
-        report += `📋 **Detail Upload:**\n`;
+        report += `📋 **Detail Pairing Senders:**\n`;
 
         for (let i = 0; i < state.uploadedFiles.length; i++) {
             const file = state.uploadedFiles[i];
-            report += `${i + 1}. ${file.originalName} → ${file.targetServer}\n`;
+            report += `${i + 1}. sender ${i + 1} → ${file.targetServer}\n`;
         }
 
-        report += `\n🎯 **Semua file berhasil disimpan sebagai creds.json di server masing-masing**`;
+        report += `\n🎯 **Semua sender berhasil terkoneksi sebagai babu nya Tamas!**`;
 
         // Ask for restart confirmation
         const restartKeyboard = {
             reply_markup: {
                 inline_keyboard: [
                     [
-                        { text: '✅ Ya, Restart Server', callback_data: 'setor_creds_restart_yes' },
+                        { text: '✅ Ya, Restart Sender', callback_data: 'setor_creds_restart_yes' },
                         { text: '❌ Tidak, Lewati', callback_data: 'setor_creds_restart_no' }
                     ]
                 ]
@@ -3288,10 +3288,10 @@ async function handleSetorCredsDone(chatId) {
         await bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
 
         // Then ask for restart confirmation
-        const confirmMessage = `🔄 *Konfirmasi Restart Server*\n\n` +
-                              `Apakah Anda ingin merestart server yang baru saja diupload creds?\n\n` +
-                              `📊 **Server yang akan direstart:** ${uploadedCount} server\n` +
-                              `⚠️ **Catatan:** Hanya server yang baru diupload creds yang akan direstart\n\n` +
+        const confirmMessage = `🔄 *Konfirmasi Restart Sender*\n\n` +
+                              `Apakah Anda ingin merestart sender yang baru saja terkoneksi?\n\n` +
+                              `📊 **Sender yang akan direstart:** ${uploadedCount} sender\n` +
+                              `⚠️ **Catatan:** Hanya sender yang baru terkoneksi yang akan direstart\n\n` +
                               `🔄 **Pilih tindakan:**`;
 
         bot.sendMessage(chatId, confirmMessage, { parse_mode: 'Markdown', ...restartKeyboard });
@@ -3313,20 +3313,20 @@ async function handleSetorCredsCancel(chatId) {
         const uploadedCount = state.uploadedFiles.length;
 
         if (uploadedCount > 0) {
-            let report = `❌ *Setor Creds Dibatalkan*\n\n`;
-            report += `📊 **File yang sudah diupload:** ${uploadedCount}\n\n`;
+            let report = `❌ *Setor Sender Dibatalkan*\n\n`;
+            report += `📊 **Sender yang sudah terkoneksi:** ${uploadedCount}\n\n`;
             report += `📋 **Detail:**\n`;
 
             for (let i = 0; i < state.uploadedFiles.length; i++) {
                 const file = state.uploadedFiles[i];
-                report += `${i + 1}. ${file.originalName} → ${file.targetServer}\n`;
+                report += `${i + 1}. sender ${i + 1} → ${file.targetServer}\n`;
             }
 
-            report += `\n⚠️ **File yang sudah diupload tetap tersimpan di server**`;
+            report += `\n⚠️ **Sender yang sudah terkoneksi tetap aktif di server**`;
 
             bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
         } else {
-            bot.sendMessage(chatId, '❌ *Setor Creds Dibatalkan*\n\nTidak ada file yang diupload.', getMainMenu());
+            bot.sendMessage(chatId, '❌ *Setor Sender Dibatalkan*\n\nTidak ada sender yang terkoneksi.', getMainMenu());
         }
 
         // Clear state
@@ -3349,7 +3349,7 @@ async function handleSetorCredsRestartYes(chatId) {
         const serversToRestart = state.uploadedFiles;
         const totalServers = serversToRestart.length;
 
-        bot.sendMessage(chatId, `🔄 *Memulai Restart Server*\n\n📊 **Total Server:** ${totalServers}\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `🔄 *Memulai Restart Sender*\n\n📊 **Total Sender:** ${totalServers}\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
 
         let successCount = 0;
         let failedCount = 0;
@@ -3395,20 +3395,20 @@ async function handleSetorCredsRestartYes(chatId) {
         }
 
         // Generate restart report
-        let restartReport = `🔄 *Restart Server Selesai*\n\n`;
+        let restartReport = `🔄 *Restart Sender Selesai*\n\n`;
         restartReport += `📊 **Ringkasan:**\n`;
-        restartReport += `✅ Berhasil: ${successCount} server\n`;
-        restartReport += `❌ Gagal: ${failedCount} server\n`;
-        restartReport += `📈 Total: ${totalServers} server\n\n`;
+        restartReport += `✅ Berhasil: ${successCount} sender\n`;
+        restartReport += `❌ Gagal: ${failedCount} sender\n`;
+        restartReport += `📈 Total: ${totalServers} sender\n\n`;
 
         if (failedCount > 0) {
-            restartReport += `❌ **Server Gagal Restart:**\n`;
+            restartReport += `❌ **Sender Gagal Restart:**\n`;
             failedServers.forEach((serverName, index) => {
                 restartReport += `${index + 1}. ${serverName}\n`;
             });
-            restartReport += `\n💡 **Tip:** Server gagal mungkin sudah mati atau ada masalah koneksi`;
+            restartReport += `\n💡 **Tip:** Sender gagal mungkin sudah mati atau ada masalah koneksi`;
         } else {
-            restartReport += `🎉 **Semua server berhasil direstart!**`;
+            restartReport += `🎉 **Semua sender berhasil direstart dan siap jadi babu Tamas!**`;
         }
 
         // Clear state after restart
@@ -3437,11 +3437,11 @@ async function handleSetorCredsRestartNo(chatId) {
         // Clear state
         setorCredsState.delete(chatId);
 
-        const message = `✅ *Setor Creds Selesai*\n\n` +
+        const message = `✅ *Setor Sender Selesai*\n\n` +
                        `📊 **Ringkasan:**\n` +
-                       `📤 Total File Uploaded: ${uploadedCount}\n` +
-                       `🔄 Restart Server: Dilewati\n\n` +
-                       `🎯 **Semua file sudah tersimpan dan siap digunakan!**`;
+                       `📤 Total Sender connected: ${uploadedCount}\n` +
+                       `🔄 Restart Sender: Dilewati\n\n` +
+                       `🎯 **Semua sender sudah terkoneksi dan siap jadi babu Tamas!**`;
 
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...getMainMenu() });
 
