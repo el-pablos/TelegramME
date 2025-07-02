@@ -36,11 +36,25 @@ function isPanelBlacklisted(panelUrl) {
     }
 }
 
-// Helper function to clean JSON content (remove line numbers)
+// Helper function to clean JSON content (remove line numbers and other artifacts)
 function cleanJsonContent(content) {
     try {
+        let cleaned = content;
+
         // Remove line numbers at the beginning (like "1{" -> "{")
-        const cleaned = content.replace(/^\d+/, '').trim();
+        cleaned = cleaned.replace(/^\d+/, '').trim();
+
+        // Remove any BOM (Byte Order Mark) characters
+        cleaned = cleaned.replace(/^\uFEFF/, '');
+
+        // Remove any leading/trailing whitespace and control characters
+        cleaned = cleaned.replace(/^[\s\r\n\t]+|[\s\r\n\t]+$/g, '');
+
+        // Try to find JSON content if it's wrapped in other text
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (jsonMatch) {
+            cleaned = jsonMatch[0];
+        }
 
         // Validate it's still valid JSON
         JSON.parse(cleaned);
@@ -48,7 +62,16 @@ function cleanJsonContent(content) {
         return cleaned;
     } catch (error) {
         console.error('Error cleaning JSON content:', error);
-        return content; // Return original if cleaning fails
+        console.error('Original content preview:', content.substring(0, 200));
+
+        // Try one more time with just the original content
+        try {
+            JSON.parse(content);
+            return content;
+        } catch (originalError) {
+            console.error('Original content also invalid JSON:', originalError.message);
+            return content; // Return original if all cleaning attempts fail
+        }
     }
 }
 
@@ -1177,6 +1200,14 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             // Handle setor_creds_cancel callback
             else if (data === 'setor_creds_cancel') {
                 await handleSetorCredsCancel(chatId);
+            }
+            // Handle setor_creds_restart_yes callback
+            else if (data === 'setor_creds_restart_yes') {
+                await handleSetorCredsRestartYes(chatId);
+            }
+            // Handle setor_creds_restart_no callback
+            else if (data === 'setor_creds_restart_no') {
+                await handleSetorCredsRestartNo(chatId);
             }
             // Handle blacklist_remove_ callbacks
             else if (data.startsWith('blacklist_remove_')) {
@@ -2992,12 +3023,14 @@ async function handleSetorCredsUpload(chatId, msg) {
             return bot.sendMessage(chatId, '❌ Session setor creds tidak ditemukan. Mulai ulang dari menu.', getMainMenu());
         }
 
-        // Check file extension
-        const fileName = document.file_name || 'unknown.file';
-        const fileExt = path.extname(fileName).toLowerCase();
+        // Check file extension - handle files with spaces and special characters
+        const originalFileName = document.file_name || 'unknown.file';
+        // Sanitize filename for logging and display (but keep original for user feedback)
+        const fileName = originalFileName.replace(/[^\w\s.-]/g, '').trim();
+        const fileExt = path.extname(originalFileName).toLowerCase();
 
         if (fileExt !== '.json') {
-            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${fileName}\nAlasan: Hanya file .json yang diterima\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${originalFileName}\nAlasan: Hanya file .json yang diterima\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
         }
 
         // Check if we have available servers
@@ -3010,20 +3043,34 @@ async function handleSetorCredsUpload(chatId, msg) {
             return bot.sendMessage(chatId, `❌ *File Terlalu Besar*\n\nFile: ${fileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\nMaksimal: 1 MB\n\nSilakan upload file yang lebih kecil.`, { parse_mode: 'Markdown' });
         }
 
-        bot.sendMessage(chatId, `📥 *Memproses File*\n\nFile: ${fileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\n\nMengunduh dan memvalidasi...`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `📥 *Memproses File*\n\nFile: ${originalFileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\n\nMengunduh dan memvalidasi...`, { parse_mode: 'Markdown' });
 
-        // Download file
-        const fileLink = await bot.getFileLink(document.file_id);
-        const response = await axios.get(fileLink, { responseType: 'text' });
-        const fileContent = response.data;
+        // Download file with better error handling
+        let fileContent;
+        try {
+            const fileLink = await bot.getFileLink(document.file_id);
+            const response = await axios.get(fileLink, { responseType: 'text' });
+            fileContent = response.data;
+        } catch (downloadError) {
+            console.error('File download error:', downloadError);
+            return bot.sendMessage(chatId, `❌ *Error Download File*\n\nFile: ${originalFileName}\nError: Gagal mengunduh file dari Telegram\n\nSilakan coba upload ulang.`, { parse_mode: 'Markdown' });
+        }
 
         // Clean and validate JSON
         let jsonData;
         try {
+            console.log(`📄 Processing file: ${fileName}`);
+            console.log(`📄 File size: ${document.file_size} bytes`);
+            console.log(`📄 Content preview: ${fileContent.substring(0, 100)}...`);
+
             const cleanedContent = cleanJsonContent(fileContent);
             jsonData = JSON.parse(cleanedContent);
+
+            console.log(`✅ JSON validation successful for: ${fileName}`);
         } catch (parseError) {
-            return bot.sendMessage(chatId, `❌ *File JSON Tidak Valid*\n\nFile: ${fileName}\nError: ${parseError.message}\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
+            console.error('JSON parse error for file:', fileName, parseError);
+            console.error('File content preview:', fileContent.substring(0, 200));
+            return bot.sendMessage(chatId, `❌ *File JSON Tidak Valid*\n\nFile: ${originalFileName}\nError: ${parseError.message}\n\nPastikan file berisi JSON yang valid.\n\n💡 **Tips:**\n• Cek format JSON dengan validator online\n• Pastikan tidak ada karakter aneh di awal/akhir file`, { parse_mode: 'Markdown' });
         }
 
         // Get next available server
@@ -3041,13 +3088,19 @@ async function handleSetorCredsUpload(chatId, msg) {
         }
 
         // Write creds.json to target server
-        fs.writeFileSync(targetCredsPath, JSON.stringify(jsonData, null, 2), { mode: 0o644 });
+        try {
+            fs.writeFileSync(targetCredsPath, JSON.stringify(jsonData, null, 2), { mode: 0o644 });
+        } catch (writeError) {
+            console.error('File write error:', writeError);
+            return bot.sendMessage(chatId, `❌ *Error Menyimpan File*\n\nFile: ${originalFileName}\nTarget: ${targetName}\nError: ${writeError.message}\n\nSilakan coba lagi.`, { parse_mode: 'Markdown' });
+        }
 
         // Update state
         state.uploadedFiles.push({
-            originalName: fileName,
+            originalName: originalFileName,
             targetServer: targetName,
             targetUuid: targetUuid,
+            targetIdentifier: targetServer.attributes.identifier, // Add identifier for restart
             uploadTime: new Date()
         });
 
@@ -3055,7 +3108,7 @@ async function handleSetorCredsUpload(chatId, msg) {
         setorCredsState.set(chatId, state);
 
         const successMessage = `✅ *File Berhasil Diupload*\n\n` +
-                              `📄 **File:** ${fileName}\n` +
+                              `📄 **File:** ${originalFileName}\n` +
                               `🎯 **Target Server:** ${targetName}\n` +
                               `📁 **Disimpan sebagai:** creds.json\n` +
                               `📊 **Progress:** ${state.uploadedFiles.length} file uploaded\n` +
@@ -3066,7 +3119,22 @@ async function handleSetorCredsUpload(chatId, msg) {
 
     } catch (error) {
         console.error('Handle setor creds upload error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses file: ${error.message}`, { parse_mode: 'Markdown' });
+
+        // Handle specific error types
+        let errorMessage = `❌ Error saat memproses file: ${originalFileName}\n\n`;
+
+        if (error.code === 'EFATAL' || error.name === 'AggregateError') {
+            errorMessage += `🔧 **Error Type:** ${error.name || error.code}\n`;
+            errorMessage += `💡 **Solusi:** Coba upload ulang file atau rename file tanpa karakter khusus\n\n`;
+            errorMessage += `📝 **Tips:**\n`;
+            errorMessage += `• Rename file jadi nama sederhana (contoh: creds1.json)\n`;
+            errorMessage += `• Hindari spasi dan karakter khusus dalam nama file\n`;
+            errorMessage += `• Pastikan file tidak corrupt`;
+        } else {
+            errorMessage += `Error: ${error.message}`;
+        }
+
+        bot.sendMessage(chatId, errorMessage, { parse_mode: 'Markdown' });
     }
 }
 
@@ -3100,10 +3168,29 @@ async function handleSetorCredsDone(chatId) {
 
         report += `\n🎯 **Semua file berhasil disimpan sebagai creds.json di server masing-masing**`;
 
-        // Clear state
-        setorCredsState.delete(chatId);
+        // Ask for restart confirmation
+        const restartKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Restart Server', callback_data: 'setor_creds_restart_yes' },
+                        { text: '❌ Tidak, Lewati', callback_data: 'setor_creds_restart_no' }
+                    ]
+                ]
+            }
+        };
 
-        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+        // Send completion report first
+        await bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+
+        // Then ask for restart confirmation
+        const confirmMessage = `🔄 *Konfirmasi Restart Server*\n\n` +
+                              `Apakah Anda ingin merestart server yang baru saja diupload creds?\n\n` +
+                              `📊 **Server yang akan direstart:** ${uploadedCount} server\n` +
+                              `⚠️ **Catatan:** Hanya server yang baru diupload creds yang akan direstart\n\n` +
+                              `🔄 **Pilih tindakan:**`;
+
+        bot.sendMessage(chatId, confirmMessage, { parse_mode: 'Markdown', ...restartKeyboard });
 
     } catch (error) {
         console.error('Handle setor creds done error:', error);
@@ -3144,6 +3231,121 @@ async function handleSetorCredsCancel(chatId) {
     } catch (error) {
         console.error('Handle setor creds cancel error:', error);
         bot.sendMessage(chatId, `❌ Error saat membatalkan setor creds: ${error.message}`, getMainMenu());
+    }
+}
+
+async function handleSetorCredsRestartYes(chatId) {
+    try {
+        const state = setorCredsState.get(chatId);
+
+        if (!state || !state.uploadedFiles || state.uploadedFiles.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada data server untuk direstart.', getMainMenu());
+        }
+
+        const serversToRestart = state.uploadedFiles;
+        const totalServers = serversToRestart.length;
+
+        bot.sendMessage(chatId, `🔄 *Memulai Restart Server*\n\n📊 **Total Server:** ${totalServers}\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        let successCount = 0;
+        let failedCount = 0;
+        const failedServers = [];
+
+        for (const serverInfo of serversToRestart) {
+            try {
+                console.log(`🔄 Restarting server: ${serverInfo.targetServer} (${serverInfo.targetUuid})`);
+
+                // Try different identifiers for restart
+                const identifiers = [
+                    serverInfo.targetUuid,
+                    serverInfo.targetIdentifier
+                ].filter(Boolean);
+
+                let restartSuccess = false;
+
+                for (const identifier of identifiers) {
+                    console.log(`🔄 Trying restart with identifier: ${identifier}`);
+                    restartSuccess = await PteroAPI.restartServer(identifier);
+                    if (restartSuccess) {
+                        console.log(`✅ Successfully restarted ${serverInfo.targetServer} using identifier: ${identifier}`);
+                        break;
+                    }
+                }
+
+                if (restartSuccess) {
+                    successCount++;
+                } else {
+                    failedCount++;
+                    failedServers.push(serverInfo.targetServer);
+                    console.log(`❌ All restart attempts failed for: ${serverInfo.targetServer}`);
+                }
+
+                // Small delay between restarts to avoid overwhelming the API
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+            } catch (error) {
+                failedCount++;
+                failedServers.push(serverInfo.targetServer);
+                console.error(`❌ Error restarting ${serverInfo.targetServer}:`, error.message);
+            }
+        }
+
+        // Generate restart report
+        let restartReport = `🔄 *Restart Server Selesai*\n\n`;
+        restartReport += `📊 **Ringkasan:**\n`;
+        restartReport += `✅ Berhasil: ${successCount} server\n`;
+        restartReport += `❌ Gagal: ${failedCount} server\n`;
+        restartReport += `📈 Total: ${totalServers} server\n\n`;
+
+        if (failedCount > 0) {
+            restartReport += `❌ **Server Gagal Restart:**\n`;
+            failedServers.forEach((serverName, index) => {
+                restartReport += `${index + 1}. ${serverName}\n`;
+            });
+            restartReport += `\n💡 **Tip:** Server gagal mungkin sudah mati atau ada masalah koneksi`;
+        } else {
+            restartReport += `🎉 **Semua server berhasil direstart!**`;
+        }
+
+        // Clear state after restart
+        setorCredsState.delete(chatId);
+
+        bot.sendMessage(chatId, restartReport, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle setor creds restart yes error:', error);
+        bot.sendMessage(chatId, `❌ Error saat restart server: ${error.message}`, getMainMenu());
+        // Clear state on error
+        setorCredsState.delete(chatId);
+    }
+}
+
+async function handleSetorCredsRestartNo(chatId) {
+    try {
+        const state = setorCredsState.get(chatId);
+
+        if (!state) {
+            return bot.sendMessage(chatId, '❌ Session tidak ditemukan.', getMainMenu());
+        }
+
+        const uploadedCount = state.uploadedFiles ? state.uploadedFiles.length : 0;
+
+        // Clear state
+        setorCredsState.delete(chatId);
+
+        const message = `✅ *Setor Creds Selesai*\n\n` +
+                       `📊 **Ringkasan:**\n` +
+                       `📤 Total File Uploaded: ${uploadedCount}\n` +
+                       `🔄 Restart Server: Dilewati\n\n` +
+                       `🎯 **Semua file sudah tersimpan dan siap digunakan!**`;
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle setor creds restart no error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        // Clear state on error
+        setorCredsState.delete(chatId);
     }
 }
 
