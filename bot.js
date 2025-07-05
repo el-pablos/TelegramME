@@ -2956,41 +2956,73 @@ async function handleSetorCreds(chatId) {
             return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel utama!', getMainMenu());
         }
 
-        // Count servers without creds.json
+        // Count servers that can receive creds (have session folder but no creds.json)
         let availableServers = 0;
+        let serversWithoutSession = 0;
+        let serversWithCreds = 0;
+
         for (const server of servers) {
             const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/files/session`;
             const credsPath = `${sessionPath}/creds.json`;
 
-            if (!fs.existsSync(credsPath)) {
+            if (!fs.existsSync(sessionPath)) {
+                // No session folder - cannot receive creds
+                serversWithoutSession++;
+            } else if (!fs.existsSync(credsPath)) {
+                // Has session folder but no creds.json - can receive creds
                 availableServers++;
+            } else {
+                // Has both session folder and creds.json - already has creds
+                serversWithCreds++;
             }
+        }
+
+        if (availableServers === 0) {
+            const statusMessage = `❌ *Tidak Ada Server yang Bisa Diisi Sender*\n\n` +
+                                 `📊 **Status Panel:**\n` +
+                                 `🏠 Panel Utama: ${PANEL_URL}\n` +
+                                 `📈 Total Server: ${servers.length}\n` +
+                                 `✅ Sudah ada sender: ${serversWithCreds}\n` +
+                                 `📁 Tanpa folder session: ${serversWithoutSession}\n` +
+                                 `🆓 Siap terima sender: ${availableServers}\n\n` +
+                                 `⚠️ **Catatan:**\n` +
+                                 `• Server tanpa folder session perlu dibuat dulu folder sessionnya\n` +
+                                 `• Gunakan menu "📁 Session Folder" untuk membuat folder session\n` +
+                                 `• Setelah folder session dibuat, baru bisa upload sender`;
+
+            return bot.sendMessage(chatId, statusMessage, { parse_mode: 'Markdown', ...getMainMenu() });
         }
 
         const message = `📤 *Setor Sender - Upload JSON Files*\n\n` +
                        `📊 **Status Panel:**\n` +
                        `🏠 Panel Utama: ${PANEL_URL}\n` +
                        `📈 Total Server: ${servers.length}\n` +
-                       `🆓 Server Kosong (tanpa sender): ${availableServers}\n\n` +
+                       `✅ Sudah ada sender: ${serversWithCreds}\n` +
+                       `📁 Tanpa folder session: ${serversWithoutSession}\n` +
+                       `🆓 Siap terima sender: ${availableServers}\n\n` +
+                       `🎯 **Target Upload:**\n` +
+                       `• Hanya server dengan folder session yang siap\n` +
+                       `• Maksimal ${availableServers} sender bisa diupload\n` +
+                       `• Server tanpa folder session akan dilewati\n\n` +
                        `📋 **Cara Penggunaan:**\n` +
                        `1️⃣ Kirim file JSON sender (nama bebas: sender1.json, config.json, dll)\n` +
                        `2️⃣ Bot akan auto-rename jadi creds.json\n` +
-                       `3️⃣ Auto-distribute ke server kosong (1 sender = 1 server)\n` +
-                       `4️⃣ Kirim /done untuk selesai\n\n` +
+                       `3️⃣ Auto-distribute ke server yang siap terima sender\n` +
+                       `4️⃣ Klik "✅ Selesai Upload" untuk selesai\n\n` +
                        `⚠️ **Catatan:**\n` +
                        `• Hanya file .json yang diterima\n` +
                        `• File akan di-validate sebagai JSON\n` +
-                       `• Tidak akan menimpa sender yang sudah ada\n` +
-                       `• Maksimal ${availableServers} sender bisa diupload\n\n` +
+                       `• Tidak akan menimpa sender yang sudah ada\n\n` +
                        `📤 **Mulai upload file JSON sender Anda!**`;
 
-        // Set user to setor creds mode
+        // Set user to setor creds mode - only include servers with session folder but no creds.json
         setorCredsState.set(chatId, {
             uploadedFiles: [],
             availableServers: servers.filter(server => {
                 const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/files/session`;
                 const credsPath = `${sessionPath}/creds.json`;
-                return !fs.existsSync(credsPath);
+                // Only include servers that have session folder but no creds.json
+                return fs.existsSync(sessionPath) && !fs.existsSync(credsPath);
             }),
             startTime: new Date()
         });
@@ -3186,17 +3218,36 @@ async function handleSetorCredsUpload(chatId, msg) {
         const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/files/session`;
         const targetCredsPath = `${targetSessionPath}/creds.json`;
 
-        // Create session directory if it doesn't exist
+        console.log(`📁 Target server: ${targetName} (${targetUuid})`);
+        console.log(`📁 Session path: ${targetSessionPath}`);
+        console.log(`📄 Creds path: ${targetCredsPath}`);
+
+        // Verify session directory exists (it should, since we filtered for it)
         if (!fs.existsSync(targetSessionPath)) {
-            fs.mkdirSync(targetSessionPath, { recursive: true, mode: 0o755 });
+            console.error(`❌ Session folder not found: ${targetSessionPath}`);
+            return bot.sendMessage(chatId, `❌ *Error: Folder Session Tidak Ditemukan*\n\nServer: ${targetName}\nPath: ${targetSessionPath}\n\nFolder session harus dibuat terlebih dahulu.\nGunakan menu "📁 Session Folder" untuk membuat folder.`, { parse_mode: 'Markdown' });
         }
+
+        console.log(`✅ Session folder exists: ${targetSessionPath}`);
 
         // Write creds.json to target server
         try {
+            console.log(`💾 Writing creds.json to: ${targetCredsPath}`);
             fs.writeFileSync(targetCredsPath, JSON.stringify(jsonData, null, 2), { mode: 0o644 });
+            console.log(`✅ Successfully wrote creds.json to: ${targetCredsPath}`);
+
+            // Verify file was actually written
+            if (fs.existsSync(targetCredsPath)) {
+                const fileStats = fs.statSync(targetCredsPath);
+                console.log(`✅ File verification successful - Size: ${fileStats.size} bytes`);
+            } else {
+                console.error(`❌ File verification failed - File not found: ${targetCredsPath}`);
+                return bot.sendMessage(chatId, `❌ *Error: File Tidak Tersimpan*\n\nFile: ${originalFileName}\nTarget: ${targetName}\nPath: ${targetCredsPath}\n\nFile berhasil ditulis tapi tidak ditemukan setelah verifikasi.`, { parse_mode: 'Markdown' });
+            }
+
         } catch (writeError) {
             console.error('File write error:', writeError);
-            return bot.sendMessage(chatId, `❌ *Error Menyimpan File*\n\nFile: ${originalFileName}\nTarget: ${targetName}\nError: ${writeError.message}\n\nSilakan coba lagi.`, { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, `❌ *Error Menyimpan File*\n\nFile: ${originalFileName}\nTarget: ${targetName}\nError: ${writeError.message}\nPath: ${targetCredsPath}\n\nSilakan coba lagi.`, { parse_mode: 'Markdown' });
         }
 
         // Update state
