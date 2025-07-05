@@ -2198,7 +2198,7 @@ async function handleSessionFolderForUser(chatId, userId) {
                 const serverUuid = server.attributes.uuid;
 
                 // Create session folder path
-                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/files/session`;
 
                 // Check if session folder already exists
                 if (fs.existsSync(sessionPath)) {
@@ -2255,7 +2255,7 @@ async function handleAutoCredsJson(chatId) {
 
         for (const server of servers) {
             const serverUuid = server.attributes.uuid;
-            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/files/session`;
             const credsPath = `${sessionPath}/creds.json`;
 
             if (fs.existsSync(sessionPath) && !fs.existsSync(credsPath)) {
@@ -2309,7 +2309,7 @@ async function handleCredsForServer(chatId, serverUuid) {
         }
 
         const serverName = server.attributes.name;
-        const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+        const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/files/session`;
         const credsPath = `${sessionPath}/creds.json`;
 
         // Double check if session folder exists and creds.json doesn't exist
@@ -2463,7 +2463,7 @@ async function handleDeleteSessionForUser(chatId, userId) {
 
         for (const server of servers) {
             const serverUuid = server.attributes.uuid;
-            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/files/session`;
 
             if (fs.existsSync(sessionPath)) {
                 hasSessionCount++;
@@ -2519,7 +2519,7 @@ async function executeDeleteSessionForUser(chatId, userId) {
             try {
                 const serverName = server.attributes.name;
                 const serverUuid = server.attributes.uuid;
-                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
+                const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/files/session`;
 
                 // Check if session folder exists
                 if (!fs.existsSync(sessionPath)) {
@@ -2644,7 +2644,7 @@ async function handleDeleteExternalSessions(chatId) {
         // Count servers with session folders
         let serversWithSessions = 0;
         for (const server of externalServers) {
-            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/files/session`;
             if (fs.existsSync(sessionPath)) {
                 serversWithSessions++;
             }
@@ -2694,7 +2694,7 @@ async function executeDeleteExternalSessions(chatId) {
             try {
                 const externalUuid = externalServer.attributes.uuid;
                 const externalName = externalServer.attributes.name;
-                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/files/session`;
 
                 console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
                 console.log(`📁 Session path: ${externalSessionPath}`);
@@ -2756,7 +2756,7 @@ async function handleCopyExternalCredsForUser(chatId, userId) {
         // Count servers with creds.json
         let serversWithCreds = 0;
         for (const server of externalServers) {
-            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/files/session`;
             const credsPath = `${sessionPath}/creds.json`;
 
             if (fs.existsSync(credsPath)) {
@@ -2826,7 +2826,7 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
             try {
                 const externalUuid = externalServer.attributes.uuid;
                 const externalName = externalServer.attributes.name;
-                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/files/session`;
                 const externalCredsPath = `${externalSessionPath}/creds.json`;
 
                 console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
@@ -2837,13 +2837,13 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
 
                 // Try different possible locations for JSON files (any name)
                 const possiblePaths = [
-                    externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/session/creds.json
-                    `/var/lib/pterodactyl/volumes/${externalUuid}/creds.json`, // Direct in volume
-                    `/var/lib/pterodactyl/volumes/${externalUuid}/session/plugins/creds.json`, // In plugins folder
+                    externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/files/session/creds.json
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/files/creds.json`, // Direct in files
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/files/session/plugins/creds.json`, // In plugins folder
                 ];
 
                 // Also check for any .json files in session directory
-                const sessionDir = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const sessionDir = `/var/lib/pterodactyl/volumes/${externalUuid}/files/session`;
                 if (fs.existsSync(sessionDir)) {
                     try {
                         const files = fs.readdirSync(sessionDir);
@@ -2901,7 +2901,7 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
                 JSON.parse(credsContent);
 
                 // Create target paths
-                const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/session`;
+                const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/files/session`;
                 const targetCredsPath = `${targetSessionPath}/creds.json`;
 
                 // Create session directory if it doesn't exist
@@ -2959,7 +2959,7 @@ async function handleSetorCreds(chatId) {
         // Count servers without creds.json
         let availableServers = 0;
         for (const server of servers) {
-            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/files/session`;
             const credsPath = `${sessionPath}/creds.json`;
 
             if (!fs.existsSync(credsPath)) {
@@ -2988,7 +2988,7 @@ async function handleSetorCreds(chatId) {
         setorCredsState.set(chatId, {
             uploadedFiles: [],
             availableServers: servers.filter(server => {
-                const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+                const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/files/session`;
                 const credsPath = `${sessionPath}/creds.json`;
                 return !fs.existsSync(credsPath);
             }),
@@ -3183,7 +3183,7 @@ async function handleSetorCredsUpload(chatId, msg) {
         const targetName = targetServer.attributes.name;
 
         // Create target paths
-        const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/session`;
+        const targetSessionPath = `/var/lib/pterodactyl/volumes/${targetUuid}/files/session`;
         const targetCredsPath = `${targetSessionPath}/creds.json`;
 
         // Create session directory if it doesn't exist
@@ -3733,7 +3733,7 @@ async function executeCopyExternalCreds(chatId) {
             try {
                 const externalUuid = externalServer.attributes.uuid;
                 const externalName = externalServer.attributes.name;
-                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const externalSessionPath = `/var/lib/pterodactyl/volumes/${externalUuid}/files/session`;
                 const externalCredsPath = `${externalSessionPath}/creds.json`;
 
                 console.log(`🔍 Processing external server: ${externalName} (${externalUuid})`);
@@ -3747,13 +3747,13 @@ async function executeCopyExternalCreds(chatId) {
 
                 // Try different possible locations for JSON files (any name)
                 const possiblePaths = [
-                    externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/session/creds.json
-                    `/var/lib/pterodactyl/volumes/${externalUuid}/creds.json`, // Direct in volume
-                    `/var/lib/pterodactyl/volumes/${externalUuid}/session/plugins/creds.json`, // In plugins folder
+                    externalCredsPath, // /var/lib/pterodactyl/volumes/{uuid}/files/session/creds.json
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/files/creds.json`, // Direct in files
+                    `/var/lib/pterodactyl/volumes/${externalUuid}/files/session/plugins/creds.json`, // In plugins folder
                 ];
 
                 // Also check for any .json files in session directory
-                const sessionDir = `/var/lib/pterodactyl/volumes/${externalUuid}/session`;
+                const sessionDir = `/var/lib/pterodactyl/volumes/${externalUuid}/files/session`;
                 if (fs.existsSync(sessionDir)) {
                     try {
                         const files = fs.readdirSync(sessionDir);
@@ -3831,7 +3831,7 @@ async function executeCopyExternalCreds(chatId) {
                 console.log(`✅ Found matching server: "${matchingMainServer.attributes.name}" (${matchingMainServer.attributes.uuid})`);
 
                 const mainUuid = matchingMainServer.attributes.uuid;
-                const mainSessionPath = `/var/lib/pterodactyl/volumes/${mainUuid}/session`;
+                const mainSessionPath = `/var/lib/pterodactyl/volumes/${mainUuid}/files/session`;
                 const mainCredsPath = `${mainSessionPath}/creds.json`;
 
                 // Create session folder in main panel if not exists
