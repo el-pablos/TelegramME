@@ -2961,21 +2961,44 @@ async function handleSetorCreds(chatId) {
         let serversWithoutSession = 0;
         let serversWithCreds = 0;
 
+        console.log(`🔍 Starting setor creds detection for ${servers.length} servers...`);
+
         for (const server of servers) {
-            const sessionPath = `/var/lib/pterodactyl/volumes/${server.attributes.uuid}/session`;
+            const serverName = server.attributes.name;
+            const serverUuid = server.attributes.uuid;
+            const sessionPath = `/var/lib/pterodactyl/volumes/${serverUuid}/session`;
             const credsPath = `${sessionPath}/creds.json`;
 
-            if (!fs.existsSync(sessionPath)) {
+            console.log(`\n📋 Checking server: ${serverName} (${serverUuid})`);
+            console.log(`📁 Session path: ${sessionPath}`);
+            console.log(`📄 Creds path: ${credsPath}`);
+
+            const sessionExists = fs.existsSync(sessionPath);
+            const credsExists = fs.existsSync(credsPath);
+
+            console.log(`📁 Session folder exists: ${sessionExists}`);
+            console.log(`📄 Creds.json exists: ${credsExists}`);
+
+            if (!sessionExists) {
                 // No session folder - cannot receive creds
                 serversWithoutSession++;
-            } else if (!fs.existsSync(credsPath)) {
+                console.log(`❌ Server ${serverName}: No session folder`);
+            } else if (!credsExists) {
                 // Has session folder but no creds.json - can receive creds
                 availableServers++;
+                console.log(`✅ Server ${serverName}: Ready to receive creds`);
             } else {
                 // Has both session folder and creds.json - already has creds
                 serversWithCreds++;
+                console.log(`🔑 Server ${serverName}: Already has creds`);
             }
         }
+
+        console.log(`\n📊 Detection Summary:`);
+        console.log(`📈 Total servers: ${servers.length}`);
+        console.log(`✅ Already has creds: ${serversWithCreds}`);
+        console.log(`📁 Without session folder: ${serversWithoutSession}`);
+        console.log(`🆓 Ready to receive creds: ${availableServers}`);
 
         if (availableServers === 0) {
             const statusMessage = `❌ *Tidak Ada Server yang Bisa Diisi Sender*\n\n` +
