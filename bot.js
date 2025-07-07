@@ -117,12 +117,34 @@ function cleanJsonContent(content) {
     }
 }
 
-// Configuration
+// Escape Markdown special characters to prevent Telegram parsing errors
+function escapeMarkdown(text) {
+    if (!text || typeof text !== 'string') {
+        return text;
+    }
+
+    // Escape special Markdown characters that can cause parsing errors
+    return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+}
+
+// Configuration from .env
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = parseInt(process.env.OWNER_TELEGRAM_ID);
-const PANEL_URL = process.env.PTERODACTYL_PANEL_URL;
-const APP_API_KEY = process.env.PTERODACTYL_APPLICATION_API_KEY;
-const CLIENT_API_KEY = process.env.PTERODACTYL_CLIENT_API_KEY;
+const PANEL_URL = process.env.PANEL_URL;
+const APP_API_KEY = process.env.APP_API_KEY;
+const CLIENT_API_KEY = process.env.CLIENT_API_KEY;
+
+// External Panel Configuration
+const EXTERNAL_PANEL_DOMAIN = process.env.EXTERNAL_PANEL_DOMAIN;
+const EXTERNAL_PANEL_PLTA = process.env.EXTERNAL_PANEL_PLTA;
+const EXTERNAL_PANEL_PLTC = process.env.EXTERNAL_PANEL_PLTC;
+const EXTERNAL_PANEL_LOC = process.env.EXTERNAL_PANEL_LOC;
+const EXTERNAL_PANEL_NESTS = process.env.EXTERNAL_PANEL_NESTS;
+const EXTERNAL_PANEL_EGGS = process.env.EXTERNAL_PANEL_EGGS;
+
+// Output Directories
+const OUTPUT_EXTERNAL_DIR = process.env.OUTPUT_EXTERNAL_DIR || 'output-external';
+const OUTPUT_SCRAPE_SENDER_DIR = process.env.OUTPUT_SCRAPE_SENDER_DIR || 'output-scrape-sender';
 
 // Validate required environment variables
 if (!BOT_TOKEN || !OWNER_ID || !PANEL_URL || !APP_API_KEY || !CLIENT_API_KEY) {
@@ -151,14 +173,14 @@ console.log('🌹 Rose Bot Features: Loaded!');
 // Load blacklist from file
 loadBlacklistFromFile();
 
-// External Panel Configuration
+// External Panel Configuration from .env
 const EXTERNAL_PANEL = {
-    domain: 'https://panel-one.ndikafath.com',
-    plta: 'ptla_a7BlBCHL3092q9UtkoIldTYc7M93DgO32CCwa8drj8p',
-    pltc: 'ptlc_pga8ppETdjzglhaKwUITFOOtnLXNshZlp7QSArYXALj',
-    loc: '1',
-    nests: '5',
-    eggs: '15'
+    domain: EXTERNAL_PANEL_DOMAIN,
+    plta: EXTERNAL_PANEL_PLTA,
+    pltc: EXTERNAL_PANEL_PLTC,
+    loc: EXTERNAL_PANEL_LOC,
+    nests: EXTERNAL_PANEL_NESTS,
+    eggs: EXTERNAL_PANEL_EGGS
 };
 
 // Panel Blacklist - Panel yang tidak boleh digunakan
@@ -249,18 +271,27 @@ class ExternalPteroAPI {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
                     'Accept-Encoding': 'gzip, deflate, br',
                     'DNT': '1',
                     'Connection': 'keep-alive',
                     'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
-                    'Cache-Control': 'max-age=0'
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'Sec-CH-UA-Mobile': '?0',
+                    'Sec-CH-UA-Platform': '"Windows"',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Referer': `${EXTERNAL_PANEL.domain}/`,
+                    'Origin': EXTERNAL_PANEL.domain
                 },
-                timeout: 30000
+                timeout: 45000,
+                maxRedirects: 5,
+                validateStatus: function (status) {
+                    return status < 500; // Accept all status codes below 500
+                }
             };
 
             if (data) config.data = data;
@@ -275,12 +306,55 @@ class ExternalPteroAPI {
             // Add delay to avoid rate limiting
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            const response = await axios(config);
-            console.log('✅ External Panel Client API Response Status:', response.status);
+            let response;
+            let retryCount = 0;
+            const maxRetries = 3;
 
-            // Check if response is HTML (Cloudflare block page)
-            if (response.headers['content-type']?.includes('text/html')) {
-                throw new Error('Cloudflare protection detected - received HTML instead of JSON');
+            while (retryCount <= maxRetries) {
+                try {
+                    response = await axios(config);
+
+                    // Check if response is HTML (Cloudflare block page)
+                    if (response.headers['content-type']?.includes('text/html') ||
+                        (typeof response.data === 'string' && response.data.includes('Just a moment'))) {
+
+                        if (retryCount < maxRetries) {
+                            console.log(`🛡️ Cloudflare challenge detected (attempt ${retryCount + 1}/${maxRetries + 1}), retrying...`);
+                            retryCount++;
+
+                            // Wait longer between retries
+                            await new Promise(resolve => setTimeout(resolve, 5000 + (retryCount * 2000)));
+
+                            // Modify headers for retry
+                            config.headers['User-Agent'] = retryCount === 1 ?
+                                'curl/7.68.0' :
+                                'PostmanRuntime/7.32.3';
+                            config.headers['Accept'] = '*/*';
+                            delete config.headers['Sec-Fetch-Dest'];
+                            delete config.headers['Sec-Fetch-Mode'];
+                            delete config.headers['Sec-Fetch-Site'];
+                            delete config.headers['Sec-CH-UA'];
+                            delete config.headers['Sec-CH-UA-Mobile'];
+                            delete config.headers['Sec-CH-UA-Platform'];
+
+                            continue;
+                        } else {
+                            throw new Error('Cloudflare protection detected - received HTML instead of JSON after all retries');
+                        }
+                    }
+
+                    console.log(`✅ External Panel Client API Response Status: ${response.status} (attempt ${retryCount + 1})`);
+                    break;
+
+                } catch (axiosError) {
+                    if (retryCount < maxRetries && (axiosError.response?.status === 403 || axiosError.response?.status === 503)) {
+                        console.log(`🛡️ HTTP ${axiosError.response.status} detected (attempt ${retryCount + 1}/${maxRetries + 1}), retrying...`);
+                        retryCount++;
+                        await new Promise(resolve => setTimeout(resolve, 5000 + (retryCount * 2000)));
+                        continue;
+                    }
+                    throw axiosError;
+                }
             }
 
             return response.data;
@@ -414,7 +488,7 @@ class PteroAPI {
         }
     }
 
-    static async clientRequest(endpoint, method = 'GET', data = null) {
+    static async clientRequest(endpoint, method = 'GET', data = null, customHeaders = {}) {
         try {
             const config = {
                 method,
@@ -422,17 +496,18 @@ class PteroAPI {
                 headers: {
                     'Authorization': `Bearer ${CLIENT_API_KEY}`,
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json'
+                    'Accept': 'application/json',
+                    ...customHeaders
                 }
             };
 
             if (data) {
                 config.data = data;
-                console.log(`📤 Sending ${method} to ${endpoint} with data:`, JSON.stringify(data));
+                console.log(`📤 Sending ${method} to ${endpoint} with data:`, typeof data === 'string' ? data.substring(0, 100) + '...' : JSON.stringify(data));
             }
 
             const response = await axios(config);
-            console.log(`📥 Response ${response.status}:`, JSON.stringify(response.data));
+            console.log(`📥 Response ${response.status}:`, response.data ? 'Success' : 'No data');
             return response.data;
         } catch (error) {
             console.error('Client API Error:', {
@@ -648,7 +723,7 @@ function getAccountCreationEstimate(userId) {
     return `${month} ${year}`;
 }
 
-// Main menu keyboard
+// Main menu keyboard - CLEANED UP (hanya fitur yang WORK)
 function getMainMenu() {
     return {
         reply_markup: {
@@ -658,10 +733,6 @@ function getMainMenu() {
                     { text: '🔧 Reinstall Semua', callback_data: 'reinstall_all' }
                 ],
                 [
-                    { text: '⚡ Optimasi Panel', callback_data: 'optimize_panel' },
-                    { text: '🛠️ Kelola Server', callback_data: 'manage_servers' }
-                ],
-                [
                     { text: '📁 Create Session Folders (All Servers)', callback_data: 'auto_session_folder' },
                     { text: '🔑 Auto Creds.json', callback_data: 'auto_creds_json' }
                 ],
@@ -669,27 +740,14 @@ function getMainMenu() {
                     { text: '🗑️ Delete All Session Folders', callback_data: 'delete_session_folder' }
                 ],
                 [
-                    { text: '📋 Copy Creds from External Panel', callback_data: 'copy_external_creds' }
-                ],
-                [
                     { text: '🔍 Scrape Creds External Panel', callback_data: 'scrape_external_creds' }
-                ],
-                [
-                    { text: '🗑️ Delete Session Folders (External Panel)', callback_data: 'delete_external_sessions' }
                 ],
                 [
                     { text: '📤 Setor Sender (Upload JSON Files)', callback_data: 'setor_creds' }
                 ],
                 [
-                    { text: '🚫 Manage Panel Blacklist', callback_data: 'manage_blacklist' }
-                ],
-                [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
                     { text: '🏥 Cek Kesehatan', callback_data: 'health_check' }
-                ],
-                [
-                    { text: '👥 Kelola Admin', callback_data: 'manage_admins' },
-                    { text: '🆕 Buat Server User', callback_data: 'create_user_server' }
                 ]
             ]
         }
@@ -881,7 +939,7 @@ bot.onText(/\/info/, async (msg) => {
 
     } catch (error) {
         console.error('Info command error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengambil informasi user: ${error.message}`);
+        bot.sendMessage(chatId, `❌ Error saat mengambil informasi user: ${escapeMarkdown(error.message)}`);
     }
 });
 
@@ -1103,7 +1161,7 @@ bot.onText(/\/addadmin (.+)/, async (msg, match) => {
 
     } catch (error) {
         console.error('Add admin error:', error);
-        bot.sendMessage(chatId, `❌ Error saat membuat admin: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat membuat admin: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 });
 
@@ -1206,6 +1264,7 @@ bot.on('callback_query', async (query) => {
         case 'scrape_external_creds':
             await handleScrapeExternalCreds(chatId);
             break;
+
         case 'server_stats':
             await handleServerStats(chatId);
             break;
@@ -1330,6 +1389,7 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             else if (data === 'scrape_external_cancel') {
                 bot.sendMessage(chatId, '❌ *Scraping Dibatalkan*\n\nOperasi scraping creds dari panel eksternal dibatalkan.', { parse_mode: 'Markdown', ...getMainMenu() });
             }
+
             // Handle delete_external_creds_yes callback
             else if (data === 'delete_external_creds_yes') {
                 await executeDeleteExternalCreds(chatId);
@@ -1340,6 +1400,7 @@ Selamat datang! Pilih aksi yang diinginkan:`;
                 delete global.scrapedFilesForDeletion;
                 bot.sendMessage(chatId, '⏭️ *Penghapusan Dilewati*\n\nFolder creds di panel eksternal dibiarkan tetap ada.\n\n📁 File hasil scraping tetap tersimpan di /output-external', { parse_mode: 'Markdown', ...getMainMenu() });
             }
+
             // Handle blacklist_remove_ callbacks
             else if (data.startsWith('blacklist_remove_')) {
                 const index = parseInt(data.replace('blacklist_remove_', ''));
@@ -1451,7 +1512,7 @@ async function handleMassRestart(chatId) {
 
     } catch (error) {
         console.error('Mass restart error:', error);
-        bot.sendMessage(chatId, `❌ Error saat restart semua: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat restart semua: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1523,7 +1584,7 @@ async function executeReinstallAll(chatId) {
 
     } catch (error) {
         console.error('Mass reinstall error:', error);
-        bot.sendMessage(chatId, `❌ Error saat reinstall semua: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat reinstall semua: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1567,7 +1628,7 @@ async function handleManageServers(chatId) {
 
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...getMainMenu() });
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1578,7 +1639,7 @@ async function handleServerStats(chatId) {
 
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...getMainMenu() });
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1674,7 +1735,7 @@ async function handleTestAPI(chatId) {
 
     } catch (error) {
         console.error('Test API error:', error);
-        bot.sendMessage(chatId, `❌ Error saat test API: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat test API: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1694,7 +1755,7 @@ async function handleTestRestart(chatId) {
         const serverUuid = testServer.attributes.uuid;
         const serverIdentifier = testServer.attributes.identifier;
 
-        bot.sendMessage(chatId, `🔄 *Testing Restart*\n\n🖥️ **Server:** ${serverName}\n🔑 **UUID:** ${serverUuid}\n📝 **Identifier:** ${serverIdentifier}\n\nMemulai test restart...`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `🔄 *Testing Restart*\n\n🖥️ **Server:** ${escapeMarkdown(serverName)}\n🔑 **UUID:** ${escapeMarkdown(serverUuid)}\n📝 **Identifier:** ${escapeMarkdown(serverIdentifier)}\n\nMemulai test restart...`, { parse_mode: 'Markdown' });
 
         console.log(`🧪 === TEST RESTART START ===`);
         console.log(`Server: ${serverName}`);
@@ -1723,7 +1784,7 @@ async function handleTestRestart(chatId) {
 
     } catch (error) {
         console.error('Test restart error:', error);
-        bot.sendMessage(chatId, `❌ Error saat test restart: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat test restart: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1745,7 +1806,7 @@ async function handleOptimizeFull(chatId) {
 
         bot.sendMessage(chatId, confirmText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1774,7 +1835,7 @@ async function handleOptimizeCache(chatId) {
 
         bot.sendMessage(chatId, resultText, { parse_mode: 'Markdown', ...getMainMenu() });
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Error saat membersihkan cache: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat membersihkan cache: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1834,7 +1895,7 @@ async function handleOptimizeMonitor(chatId) {
 
         bot.sendMessage(chatId, monitorText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Error saat monitoring: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat monitoring: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1855,7 +1916,7 @@ async function handleOptimizeRestart(chatId) {
 
         bot.sendMessage(chatId, resultText, { parse_mode: 'Markdown', ...getMainMenu() });
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Error saat restart services: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat restart services: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1926,7 +1987,7 @@ async function executeOptimizeFull(chatId) {
 
     } catch (error) {
         console.error('Execute full optimization error:', error);
-        bot.sendMessage(chatId, `❌ Error saat optimasi lengkap: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat optimasi lengkap: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -1968,7 +2029,7 @@ async function handleManageAdmins(chatId) {
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
         console.error('Manage admins error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengambil data admin: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat mengambil data admin: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2022,7 +2083,7 @@ async function handleCreateUserServer(chatId) {
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
         console.error('Create user server error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2054,7 +2115,7 @@ async function handleListAllUsers(chatId) {
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...getMainMenu() });
     } catch (error) {
         console.error('List users error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengambil daftar user: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat mengambil daftar user: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2099,7 +2160,7 @@ async function handleMoreUsers(chatId) {
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
         console.error('More users error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2140,7 +2201,7 @@ async function handleCreateServerForUser(chatId, userId) {
         bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
         console.error('Create server for user error:', error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2250,7 +2311,7 @@ async function executeCreateServers(chatId, userId, quantity) {
 
     } catch (error) {
         console.error('Execute create servers error:', error);
-        bot.sendMessage(chatId, `❌ Error saat membuat server: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat membuat server: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2324,7 +2385,7 @@ async function handleAutoSessionFolder(chatId) {
 
             } catch (error) {
                 errorCount++;
-                const errorMsg = `${server.attributes.name}: ${error.message}`;
+                const errorMsg = `${server.attributes.name}: ${escapeMarkdown(error.message)}`;
                 errorDetails.push(errorMsg);
                 console.error(`❌ Error processing ${server.attributes.name}:`, error);
             }
@@ -2374,7 +2435,7 @@ async function handleAutoSessionFolder(chatId) {
 
     } catch (error) {
         console.error('Auto session folder error:', error);
-        bot.sendMessage(chatId, `❌ Error saat membuat session folder: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat membuat session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2456,7 +2517,7 @@ async function handleSessionFolderForUser(chatId, userId) {
 
             } catch (error) {
                 errorCount++;
-                const errorMsg = `${server.attributes.name}: ${error.message}`;
+                const errorMsg = `${server.attributes.name}: ${escapeMarkdown(error.message)}`;
                 errorDetails.push(errorMsg);
                 console.error(`Error creating session folder for ${server.attributes.name}:`, error);
             }
@@ -2493,7 +2554,7 @@ async function handleSessionFolderForUser(chatId, userId) {
 
     } catch (error) {
         console.error('Session folder for user error:', error);
-        bot.sendMessage(chatId, `❌ Error saat membuat session folder: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat membuat session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2584,7 +2645,7 @@ async function handleAutoCredsJson(chatId) {
 
     } catch (error) {
         console.error('Auto creds.json error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2656,7 +2717,7 @@ async function handleCredsForServer(chatId, serverUuid) {
 
     } catch (error) {
         console.error('Creds for server error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses server: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memproses server: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2738,7 +2799,7 @@ async function processCredsJsonInput(chatId, credsContent) {
 
     } catch (error) {
         console.error('Process creds.json input error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2810,7 +2871,7 @@ async function handleDeleteSessionFolder(chatId) {
 
     } catch (error) {
         console.error('Delete session folder error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses session folder: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memproses session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2876,7 +2937,7 @@ async function executeDeleteAllSessions(chatId) {
 
             } catch (error) {
                 errorCount++;
-                const errorMsg = `${server.attributes.name}: ${error.message}`;
+                const errorMsg = `${server.attributes.name}: ${escapeMarkdown(error.message)}`;
                 errorDetails.push(errorMsg);
                 console.error(`❌ Error processing ${server.attributes.name}:`, error);
             }
@@ -2920,7 +2981,7 @@ async function executeDeleteAllSessions(chatId) {
 
     } catch (error) {
         console.error('Execute delete all sessions error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -2991,7 +3052,7 @@ async function handleDeleteSessionForUser(chatId, userId) {
 
     } catch (error) {
         console.error('Delete session for user error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses user: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memproses user: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3051,7 +3112,7 @@ async function executeDeleteSessionForUser(chatId, userId) {
 
             } catch (error) {
                 errorCount++;
-                const errorMsg = `${server.attributes.name}: ${error.message}`;
+                const errorMsg = `${server.attributes.name}: ${escapeMarkdown(error.message)}`;
                 errorDetails.push(errorMsg);
                 console.error(`Error deleting session folder for ${server.attributes.name}:`, error);
             }
@@ -3070,7 +3131,7 @@ async function executeDeleteSessionForUser(chatId, userId) {
 
     } catch (error) {
         console.error('Execute delete session for user error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3133,7 +3194,7 @@ async function handleCopyExternalCreds(chatId) {
 
     } catch (error) {
         console.error('Copy external creds error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengakses panel eksternal: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat mengakses panel eksternal: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3168,7 +3229,7 @@ async function handleDeleteExternalSessions(chatId) {
                     serversWithSessions++;
                 }
             } catch (error) {
-                console.log(`Skipping server ${server.attributes.name}: ${error.message}`);
+                console.log(`Skipping server ${server.attributes.name}: ${escapeMarkdown(error.message)}`);
             }
         }
 
@@ -3194,7 +3255,7 @@ async function handleDeleteExternalSessions(chatId) {
 
     } catch (error) {
         console.error('Handle delete external sessions error:', error);
-        bot.sendMessage(chatId, `❌ Error saat mengakses panel eksternal: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat mengakses panel eksternal: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3254,7 +3315,7 @@ async function executeDeleteExternalSessions(chatId) {
 
     } catch (error) {
         console.error('Execute delete external sessions error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menghapus session folders dari panel eksternal: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menghapus session folders dari panel eksternal: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3288,7 +3349,7 @@ async function handleCopyExternalCredsForUser(chatId, userId) {
                     serversWithCreds++;
                 }
             } catch (error) {
-                console.log(`Skipping server ${server.attributes.name}: ${error.message}`);
+                console.log(`Skipping server ${server.attributes.name}: ${escapeMarkdown(error.message)}`);
             }
         }
 
@@ -3319,7 +3380,7 @@ async function handleCopyExternalCredsForUser(chatId, userId) {
 
     } catch (error) {
         console.error('Handle copy external creds for user error:', error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3467,7 +3528,7 @@ async function executeCopyExternalCredsForUser(chatId, userId) {
 
     } catch (error) {
         console.error('Execute copy external creds for user error:', error);
-        bot.sendMessage(chatId, `❌ Error saat copy creds untuk user: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat copy creds untuk user: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3491,47 +3552,62 @@ async function handleSetorCreds(chatId) {
         let serversWithoutSession = 0;
         let serversWithCreds = 0;
 
-        console.log(`🔍 Starting setor creds detection for ${servers.length} servers...`);
+        console.log(`🔍 Starting setor creds detection via API for ${servers.length} servers...`);
 
-        for (const server of servers) {
+        for (const server of servers) { // Check all servers
             const serverName = server.attributes.name;
             const serverUuid = server.attributes.uuid;
-            
+
             try {
-                const serverVolumePath = getServerVolumePath(serverUuid);
-                const sessionPath = path.join(serverVolumePath, 'session');
-                const credsPath = path.join(sessionPath, 'creds.json');
-
                 console.log(`\n📋 Checking server: ${serverName} (${serverUuid})`);
-                console.log(`📁 Session path: ${sessionPath}`);
-                console.log(`📄 Creds path: ${credsPath}`);
 
-                const sessionExists = fs.existsSync(sessionPath);
-                const credsExists = fs.existsSync(credsPath);
+                let hasSession = false;
+                let hasCreds = false;
 
-                console.log(`📁 Session folder exists: ${sessionExists}`);
-                console.log(`📄 Creds.json exists: ${credsExists}`);
+                // Try to list files in session directory via API
+                try {
+                    const sessionFilesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list?directory=%2Fsession`, 'GET');
 
-                if (!sessionExists) {
-                    // No session folder - cannot receive creds
+                    if (sessionFilesResponse.data && sessionFilesResponse.data.length >= 0) {
+                        hasSession = true;
+                        console.log(`✅ ${serverName} has session folder`);
+
+                        // Check if creds.json exists
+                        const hasCredsFile = sessionFilesResponse.data.some(file =>
+                            file.attributes.is_file && file.attributes.name === 'creds.json'
+                        );
+
+                        if (hasCredsFile) {
+                            hasCreds = true;
+                            console.log(`🔑 ${serverName} already has creds.json`);
+                        }
+                    }
+                } catch (sessionError) {
+                    console.log(`❌ ${serverName} has no session folder or access denied`);
+                }
+
+                // Categorize server
+                if (!hasSession) {
                     serversWithoutSession++;
                     console.log(`❌ Server ${serverName}: No session folder`);
-                } else if (!credsExists) {
-                    // Has session folder but no creds.json - can receive creds
+                } else if (!hasCreds) {
                     availableServers++;
                     console.log(`✅ Server ${serverName}: Ready to receive creds`);
                 } else {
-                    // Has both session folder and creds.json - already has creds
                     serversWithCreds++;
                     console.log(`🔑 Server ${serverName}: Already has creds`);
                 }
-            } catch (pathError) {
+
+                // Small delay between checks
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+            } catch (error) {
                 serversWithoutSession++;
-                console.log(`❌ Server ${serverName}: Path error - ${pathError.message}`);
+                console.log(`❌ Server ${serverName}: API error - ${escapeMarkdown(error.message)}`);
             }
         }
 
-        console.log(`\n📊 Detection Summary:`);
+        console.log(`\n📊 API Detection Summary:`);
         console.log(`📈 Total servers: ${servers.length}`);
         console.log(`✅ Already has creds: ${serversWithCreds}`);
         console.log(`📁 Without session folder: ${serversWithoutSession}`);
@@ -3544,8 +3620,10 @@ async function handleSetorCreds(chatId) {
                                  `📈 Total Server: ${servers.length}\n` +
                                  `✅ Sudah ada sender: ${serversWithCreds}\n` +
                                  `📁 Tanpa folder session: ${serversWithoutSession}\n` +
-                                 `🆓 Siap terima sender: ${availableServers}\n\n` +
+                                 `🆓 Siap terima sender: ${availableServers}\n` +
+                                 `🌐 **Method:** Pterodactyl API\n\n` +
                                  `⚠️ **Catatan:**\n` +
+                                 `• Deteksi dilakukan via API (bukan akses file lokal)\n` +
                                  `• Server tanpa folder session perlu dibuat dulu folder sessionnya\n` +
                                  `• Gunakan menu "📁 Session Folder" untuk membuat folder session\n` +
                                  `• Setelah folder session dibuat, baru bisa upload sender`;
@@ -3559,38 +3637,30 @@ async function handleSetorCreds(chatId) {
                        `📈 Total Server: ${servers.length}\n` +
                        `✅ Sudah ada sender: ${serversWithCreds}\n` +
                        `📁 Tanpa folder session: ${serversWithoutSession}\n` +
-                       `🆓 Siap terima sender: ${availableServers}\n\n` +
+                       `🆓 Siap terima sender: ${availableServers}\n` +
+                       `🌐 **Method:** Pterodactyl API\n\n` +
                        `🎯 **Target Upload:**\n` +
+                       `• Upload dilakukan via API (bukan file lokal)\n` +
                        `• Hanya server dengan folder session yang siap\n` +
                        `• Maksimal ${availableServers} sender bisa diupload\n` +
                        `• Server tanpa folder session akan dilewati\n\n` +
                        `📋 **Cara Penggunaan:**\n` +
                        `1️⃣ Kirim file JSON sender (nama bebas: sender1.json, config.json, dll)\n` +
                        `2️⃣ Bot akan auto-rename jadi creds.json\n` +
-                       `3️⃣ Auto-distribute ke server yang siap terima sender\n` +
+                       `3️⃣ Auto-distribute ke server yang siap terima sender via API\n` +
                        `4️⃣ Klik "✅ Selesai Upload" untuk selesai\n\n` +
                        `⚠️ **Catatan:**\n` +
                        `• Hanya file .json yang diterima\n` +
                        `• File akan di-validate sebagai JSON\n` +
-                       `• Tidak akan menimpa sender yang sudah ada\n\n` +
+                       `• Upload via API, tidak perlu akses file lokal\n\n` +
                        `📤 **Mulai upload file JSON sender Anda!**`;
 
-        // Set user to setor creds mode - only include servers with session folder but no creds.json
+        // Set user to setor creds mode - use all servers (will check via API during upload)
         setorCredsState.set(chatId, {
             uploadedFiles: [],
-            availableServers: servers.filter(server => {
-                try {
-                    const serverVolumePath = getServerVolumePath(server.attributes.uuid);
-                    const sessionPath = path.join(serverVolumePath, 'session');
-                    const credsPath = path.join(sessionPath, 'creds.json');
-                    // Only include servers that have session folder but no creds.json
-                    return fs.existsSync(sessionPath) && !fs.existsSync(credsPath);
-                } catch (error) {
-                    console.log(`Skipping server ${server.attributes.name}: ${error.message}`);
-                    return false;
-                }
-            }),
-            startTime: new Date()
+            availableServers: servers, // Use all servers, will check via API during upload
+            startTime: new Date(),
+            method: 'api' // Mark as API method
         });
 
         const keyboard = {
@@ -3608,7 +3678,7 @@ async function handleSetorCreds(chatId) {
 
     } catch (error) {
         console.error('Handle setor creds error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memulai setor creds: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memulai setor creds: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3628,7 +3698,7 @@ async function handleSetorCredsUpload(chatId, msg) {
         const fileExt = path.extname(originalFileName).toLowerCase();
 
         if (fileExt !== '.json') {
-            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${originalFileName}\nAlasan: Hanya file .json yang diterima\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${escapeMarkdown(originalFileName)}\nAlasan: Hanya file .json yang diterima\n\nSilakan upload file JSON yang valid.`, { parse_mode: 'Markdown' });
         }
 
         // Check if we have available servers
@@ -3639,7 +3709,7 @@ async function handleSetorCredsUpload(chatId, msg) {
         // Check file size (max 20MB for Telegram Bot API)
         const maxFileSize = 20 * 1024 * 1024; // 20MB
         if (document.file_size > maxFileSize) {
-            return bot.sendMessage(chatId, `❌ *File Terlalu Besar*\n\nFile: ${originalFileName}\nUkuran: ${(document.file_size / 1024 / 1024).toFixed(1)} MB\nMaksimal: 20 MB\n\nSilakan kompres atau kecilkan file terlebih dahulu.`, { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, `❌ *File Terlalu Besar*\n\nFile: ${escapeMarkdown(originalFileName)}\nUkuran: ${(document.file_size / 1024 / 1024).toFixed(1)} MB\nMaksimal: 20 MB\n\nSilakan kompres atau kecilkan file terlebih dahulu.`, { parse_mode: 'Markdown' });
         }
 
         // Warn if file is unusually large for JSON
@@ -3647,7 +3717,7 @@ async function handleSetorCredsUpload(chatId, msg) {
             bot.sendMessage(chatId, `⚠️ *File Cukup Besar*\n\nFile: ${originalFileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\n\nFile JSON biasanya kecil (<100KB). Pastikan ini file yang benar.`, { parse_mode: 'Markdown' });
         }
 
-        bot.sendMessage(chatId, `📥 *Memproses File*\n\nFile: ${originalFileName}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\n\nMengunduh dan memvalidasi...`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `📥 *Memproses File*\n\nFile: ${escapeMarkdown(originalFileName)}\nUkuran: ${(document.file_size / 1024).toFixed(1)} KB\n\nMengunduh dan memvalidasi...`, { parse_mode: 'Markdown' });
 
         // Download file with retry mechanism
         let fileContent;
@@ -3775,49 +3845,114 @@ async function handleSetorCredsUpload(chatId, msg) {
             return bot.sendMessage(chatId, `❌ *File JSON Tidak Valid*\n\nFile: ${originalFileName}\nError: ${parseError.message}\n\nPastikan file berisi JSON yang valid.\n\n💡 **Tips:**\n• Cek format JSON dengan validator online\n• Pastikan tidak ada karakter aneh di awal/akhir file\n• File harus berisi object JSON {...} atau array [...]`, { parse_mode: 'Markdown' });
         }
 
-        // Get next available server
-        const targetServer = state.availableServers.shift(); // Remove from available list
-        const targetUuid = targetServer.attributes.uuid;
-        const targetName = targetServer.attributes.name;
+        // Find next available server via API
+        let targetServer = null;
+        let targetUuid = null;
+        let targetName = null;
 
-        // Create target paths
-        const targetServerVolumePath = getServerVolumePath(targetUuid);
-        const targetSessionPath = path.join(targetServerVolumePath, 'session');
-        const targetCredsPath = path.join(targetSessionPath, 'creds.json');
+        console.log(`🔍 Finding available server via API from ${state.availableServers.length} servers...`);
 
-        console.log(`📁 Target server: ${targetName} (${targetUuid})`);
-        console.log(`📁 Session path: ${targetSessionPath}`);
-        console.log(`📄 Creds path: ${targetCredsPath}`);
+        // Check if this server was already used in this session
+        const usedServerNames = state.uploadedFiles.map(file => file.targetServer);
+        console.log(`📋 Already used servers: [${usedServerNames.join(', ')}]`);
 
-        // Verify session directory exists (it should, since we filtered for it)
-        if (!fs.existsSync(targetSessionPath)) {
-            console.error(`❌ Session folder not found: ${targetSessionPath}`);
-            return bot.sendMessage(chatId, `❌ *Error: Folder Session Tidak Ditemukan*\n\nServer: ${targetName}\nPath: ${targetSessionPath}\n\nFolder session harus dibuat terlebih dahulu.\nGunakan menu "📁 Session Folder" untuk membuat folder.`, { parse_mode: 'Markdown' });
-        }
+        for (let i = 0; i < state.availableServers.length; i++) {
+            const server = state.availableServers[i];
+            const serverUuid = server.attributes.uuid;
+            const serverName = server.attributes.name;
 
-        console.log(`✅ Session folder exists: ${targetSessionPath}`);
-
-        // Write creds.json to target server
-        try {
-            console.log(`💾 Writing creds.json to: ${targetCredsPath}`);
-            fs.writeFileSync(targetCredsPath, JSON.stringify(jsonData, null, 2), { mode: 0o644 });
-            console.log(`✅ Successfully wrote creds.json to: ${targetCredsPath}`);
-
-            // Verify file was actually written
-            if (fs.existsSync(targetCredsPath)) {
-                const fileStats = fs.statSync(targetCredsPath);
-                console.log(`✅ File verification successful - Size: ${fileStats.size} bytes`);
-            } else {
-                console.error(`❌ File verification failed - File not found: ${targetCredsPath}`);
-                return bot.sendMessage(chatId, `❌ *Error: File Tidak Tersimpan*\n\nFile: ${originalFileName}\nTarget: ${targetName}\nPath: ${targetCredsPath}\n\nFile berhasil ditulis tapi tidak ditemukan setelah verifikasi.`, { parse_mode: 'Markdown' });
+            // Skip if this server was already used in this session
+            if (usedServerNames.includes(serverName)) {
+                console.log(`⏭️ Server ${serverName} already used in this session, skipping`);
+                continue;
             }
 
+            try {
+                console.log(`🔍 Checking server: ${serverName} (${serverUuid})`);
+
+                // Check if server has session folder and no creds.json via API
+                const sessionFilesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list?directory=%2Fsession`, 'GET');
+
+                if (sessionFilesResponse.data && sessionFilesResponse.data.length >= 0) {
+                    // Session folder exists, check if creds.json already exists
+                    const hasCredsFile = sessionFilesResponse.data.some(file =>
+                        file.attributes.is_file && file.attributes.name === 'creds.json'
+                    );
+
+                    if (!hasCredsFile) {
+                        // Found available server
+                        targetServer = server;
+                        targetUuid = serverUuid;
+                        targetName = serverName;
+
+                        // Remove from available list to prevent reuse
+                        console.log(`🗑️ Removing ${serverName} from available servers list`);
+                        console.log(`📊 Available servers before removal: ${state.availableServers.length}`);
+                        state.availableServers.splice(i, 1);
+                        console.log(`📊 Available servers after removal: ${state.availableServers.length}`);
+
+                        console.log(`✅ Found available server: ${serverName}`);
+                        break;
+                    } else {
+                        console.log(`⏭️ Server ${serverName} already has creds.json, skipping`);
+                    }
+                } else {
+                    console.log(`❌ Server ${serverName} has no session folder, skipping`);
+                }
+
+            } catch (checkError) {
+                console.log(`❌ Error checking server ${serverName}: ${checkError.message}`);
+            }
+        }
+
+        if (!targetServer) {
+            return bot.sendMessage(chatId, `❌ *Tidak Ada Server yang Tersedia*\n\nFile: ${originalFileName}\n\nSemua server sudah memiliki creds.json atau tidak memiliki folder session.\n\nGunakan menu "📁 Session Folder" untuk membuat folder session di server yang belum ada.`, { parse_mode: 'Markdown' });
+        }
+
+        console.log(`📁 Target server: ${targetName} (${targetUuid})`);
+
+        // Write creds.json to target server via API
+        try {
+            console.log(`💾 Writing creds.json via API to: ${targetName}`);
+            console.log(`📊 Target UUID: ${targetUuid}`);
+            console.log(`📁 Target path: /session/creds.json`);
+
+            // First, ensure session directory exists
+            try {
+                console.log(`📁 Checking if session directory exists...`);
+                await PteroAPI.clientRequest(`servers/${targetUuid}/files/list?directory=%2Fsession`, 'GET');
+                console.log(`✅ Session directory exists`);
+            } catch (dirError) {
+                console.log(`📁 Session directory doesn't exist, creating...`);
+                try {
+                    await PteroAPI.clientRequest(`servers/${targetUuid}/files/create-folder`, 'POST', {
+                        root: '/',
+                        name: 'session'
+                    });
+                    console.log(`✅ Created session directory`);
+                } catch (createError) {
+                    console.log(`⚠️ Could not create session directory: ${createError.message}`);
+                }
+            }
+
+            // Write the file using the correct API endpoint
+            console.log(`💾 Writing file content...`);
+            const fileContent = JSON.stringify(jsonData, null, 2);
+
+            await PteroAPI.clientRequest(`servers/${targetUuid}/files/write?file=%2Fsession%2Fcreds.json`, 'POST', fileContent, {
+                'Content-Type': 'text/plain'
+            });
+
+            console.log(`✅ Successfully wrote creds.json via API to: ${targetName}`);
+
         } catch (writeError) {
-            console.error('File write error:', writeError);
-            return bot.sendMessage(chatId, `❌ *Error Menyimpan File*\n\nFile: ${originalFileName}\nTarget: ${targetName}\nError: ${writeError.message}\nPath: ${targetCredsPath}\n\nSilakan coba lagi.`, { parse_mode: 'Markdown' });
+            console.error('API write error:', writeError);
+            console.error('Error details:', writeError.response?.data || writeError.message);
+            return bot.sendMessage(chatId, `❌ Error Menyimpan File via API\n\nFile: ${escapeMarkdown(originalFileName)}\nTarget: ${escapeMarkdown(targetName)}\nError: ${escapeMarkdown(writeError.message)}\n\nMethod: Pterodactyl API\n\nSilakan coba lagi.`);
         }
 
         // Update state
+        console.log(`📊 Updating state: adding ${originalFileName} → ${targetName}`);
         state.uploadedFiles.push({
             originalName: originalFileName,
             targetServer: targetName,
@@ -3827,12 +3962,14 @@ async function handleSetorCredsUpload(chatId, msg) {
         });
 
         // Update state in map
+        console.log(`💾 Saving updated state: ${state.uploadedFiles.length} files, ${state.availableServers.length} available servers`);
         setorCredsState.set(chatId, state);
 
         const successMessage = `✅ *Sender Berhasil Terkoneksi*\n\n` +
                               `📄 **Sender:** ${originalFileName}\n` +
                               `🎯 **Target Server:** ${targetName}\n` +
-                              `📁 **Disimpan sebagai:** creds.json\n` +
+                              `📁 **Disimpan sebagai:** /session/creds.json\n` +
+                              `🌐 **Method:** Pterodactyl API\n` +
                               `📊 **Progress:** ${state.uploadedFiles.length} sender connected\n` +
                               `🆓 **Server Kosong Tersisa:** ${state.availableServers.length}\n\n` +
                               `📤 **Lanjutkan upload sender berikutnya atau klik Selesai**`;
@@ -3853,7 +3990,7 @@ async function handleSetorCredsUpload(chatId, msg) {
             errorMessage += `• Hindari spasi dan karakter khusus dalam nama file\n`;
             errorMessage += `• Pastikan file tidak corrupt`;
         } else {
-            errorMessage += `Error: ${error.message}`;
+            errorMessage += `Error: ${escapeMarkdown(error.message)}`;
         }
 
         bot.sendMessage(chatId, errorMessage, { parse_mode: 'Markdown' });
@@ -3916,7 +4053,7 @@ async function handleSetorCredsDone(chatId) {
 
     } catch (error) {
         console.error('Handle setor creds done error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menyelesaikan setor creds: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menyelesaikan setor creds: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -3952,7 +4089,7 @@ async function handleSetorCredsCancel(chatId) {
 
     } catch (error) {
         console.error('Handle setor creds cancel error:', error);
-        bot.sendMessage(chatId, `❌ Error saat membatalkan setor creds: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat membatalkan setor creds: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4036,7 +4173,7 @@ async function handleSetorCredsRestartYes(chatId) {
 
     } catch (error) {
         console.error('Handle setor creds restart yes error:', error);
-        bot.sendMessage(chatId, `❌ Error saat restart server: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat restart server: ${escapeMarkdown(error.message)}`, getMainMenu());
         // Clear state on error
         setorCredsState.delete(chatId);
     }
@@ -4065,7 +4202,7 @@ async function handleSetorCredsRestartNo(chatId) {
 
     } catch (error) {
         console.error('Handle setor creds restart no error:', error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
         // Clear state on error
         setorCredsState.delete(chatId);
     }
@@ -4118,7 +4255,7 @@ async function handleManageBlacklist(chatId) {
 
     } catch (error) {
         console.error('Handle manage blacklist error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menampilkan blacklist: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menampilkan blacklist: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4151,7 +4288,7 @@ async function handleAddBlacklist(chatId) {
 
     } catch (error) {
         console.error('Handle add blacklist error:', error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4191,7 +4328,7 @@ async function handleRemoveBlacklist(chatId) {
 
     } catch (error) {
         console.error('Handle remove blacklist error:', error);
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4222,7 +4359,7 @@ async function executeRemoveBlacklist(chatId, index) {
 
     } catch (error) {
         console.error('Execute remove blacklist error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menghapus: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menghapus: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4277,7 +4414,7 @@ async function handleAddBlacklistInput(chatId, input) {
     } catch (error) {
         console.error('Handle add blacklist input error:', error);
         blacklistStates.delete(chatId);
-        bot.sendMessage(chatId, `❌ Error saat menambah blacklist: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menambah blacklist: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4294,6 +4431,487 @@ async function saveBlacklistToFile() {
         console.log('✅ Blacklist saved to file');
     } catch (error) {
         console.error('❌ Error saving blacklist:', error);
+    }
+}
+
+// Scrape External Panel Sender - Save to output-scrape-sender folder
+async function handleScrapeExternalSender(chatId) {
+    try {
+        // Check if external panel is blacklisted
+        if (isPanelBlacklisted(EXTERNAL_PANEL.domain)) {
+            return bot.sendMessage(chatId, `❌ *Panel Diblacklist*\n\nPanel ${EXTERNAL_PANEL.domain} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
+        }
+
+        bot.sendMessage(chatId, '🔍 *Memulai Scrape Sender dari Panel Eksternal*\n\nMengambil daftar server dari panel eksternal...', { parse_mode: 'Markdown' });
+
+        // Get servers from external panel
+        const externalServers = await ExternalPteroAPI.getAllServers();
+
+        if (externalServers.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel eksternal!', getMainMenu());
+        }
+
+        // Create output-scrape-sender directory if it doesn't exist
+        const outputDir = path.join(__dirname, OUTPUT_SCRAPE_SENDER_DIR);
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+            console.log(`✅ Created output directory: ${outputDir}`);
+        }
+
+        // Count servers with creds.json via API
+        let serversWithCreds = 0;
+        console.log('🔍 Checking servers for creds.json via API...');
+
+        for (const server of externalServers.slice(0, 5)) { // Check first 5 servers for preview
+            try {
+                const serverUuid = server.attributes.uuid;
+                const serverName = server.attributes.name;
+
+                console.log(`🔍 Checking ${serverName} for creds...`);
+
+                // Try to list files in /files/session directory (same as setor sender)
+                try {
+                    const sessionFilesResponse = await ExternalPteroAPI.clientRequest(`servers/${serverUuid}/files/list?directory=%2Ffiles%2Fsession`, 'GET');
+
+                    if (sessionFilesResponse.data && sessionFilesResponse.data.length > 0) {
+                        const hasJsonFiles = sessionFilesResponse.data.some(file =>
+                            file.attributes.is_file && file.attributes.name.endsWith('.json')
+                        );
+
+                        if (hasJsonFiles) {
+                            serversWithCreds++;
+                            console.log(`✅ ${serverName} has JSON files in /files/session`);
+                        }
+                    }
+                } catch (sessionError) {
+                    // Try /files directory if /files/session fails
+                    try {
+                        const filesResponse = await ExternalPteroAPI.clientRequest(`servers/${serverUuid}/files/list?directory=%2Ffiles`, 'GET');
+
+                        if (filesResponse.data && filesResponse.data.length > 0) {
+                            const hasJsonFiles = filesResponse.data.some(file =>
+                                file.attributes.is_file && file.attributes.name.endsWith('.json')
+                            );
+
+                            if (hasJsonFiles) {
+                                serversWithCreds++;
+                                console.log(`✅ ${serverName} has JSON files in /files`);
+                            }
+                        }
+                    } catch (filesError) {
+                        console.log(`❌ Cannot check ${serverName}: ${filesError.message}`);
+                    }
+                }
+
+                // Small delay between checks
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+            } catch (error) {
+                console.log(`❌ Error checking server ${server.attributes.name}: ${escapeMarkdown(error.message)}`);
+            }
+        }
+
+        console.log(`📊 Found ${serversWithCreds} servers with potential creds (from ${Math.min(5, externalServers.length)} checked)`);
+
+        if (serversWithCreds === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada server dengan creds.json ditemukan di panel eksternal!\n\n⚠️ Pastikan server memiliki file JSON di folder session atau root.', getMainMenu());
+        }
+
+        const message = `🔍 *Scrape Sender Panel Eksternal*\n\n` +
+                       `🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n` +
+                       `📊 **Total Server:** ${externalServers.length}\n` +
+                       `🔑 **Server dengan Sender:** ${serversWithCreds}+ (preview)\n` +
+                       `📁 **Output Folder:** /${OUTPUT_SCRAPE_SENDER_DIR}\n` +
+                       `🌐 **Method:** Pterodactyl API\n\n` +
+                       `⚠️ **Catatan:**\n` +
+                       `• Scraping dilakukan via API (bukan akses file lokal)\n` +
+                       `• Semua creds.json akan disalin ke folder output-scrape-sender\n` +
+                       `• File akan diberi nama sesuai nama server\n` +
+                       `• File yang sudah ada akan ditimpa\n` +
+                       `• Setelah scraping, akan ada opsi hapus folder di panel eksternal\n\n` +
+                       `🚀 **Mulai scraping sender via API?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Mulai Scraping Sender', callback_data: 'scrape_external_sender_start' },
+                        { text: '❌ Batal', callback_data: 'scrape_external_sender_cancel' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+        console.error('Handle scrape external sender error:', error);
+        bot.sendMessage(chatId, `❌ Error saat memulai scrape sender: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute scraping external sender
+async function executeScrapeExternalSender(chatId) {
+    try {
+        console.log('🚀 Starting executeScrapeExternalSender...');
+        bot.sendMessage(chatId, '🔄 *Memulai Scraping Sender via API*\n\nMengambil server dari panel eksternal...', { parse_mode: 'Markdown' });
+
+        // Get servers from external panel
+        console.log('📡 Getting servers from external panel...');
+        const externalServers = await ExternalPteroAPI.getAllServers();
+
+        console.log(`📊 External panel servers: ${externalServers.length}`);
+
+        if (externalServers.length === 0) {
+            console.log('❌ No external servers found');
+            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan di panel eksternal!', getMainMenu());
+        }
+
+        let scrapedCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+        const scrapedFiles = [];
+
+        // Create output directory
+        const outputDir = path.join(__dirname, OUTPUT_SCRAPE_SENDER_DIR);
+        console.log(`📁 Creating output directory: ${outputDir}`);
+
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+            console.log(`✅ Created output directory: ${outputDir}`);
+        } else {
+            console.log(`✅ Output directory already exists: ${outputDir}`);
+        }
+
+        bot.sendMessage(chatId, `🔄 *Memproses ${externalServers.length} server eksternal via API...*\n\n📁 **Output:** ${outputDir}`, { parse_mode: 'Markdown' });
+
+        for (const externalServer of externalServers) {
+            try {
+                const externalUuid = externalServer.attributes.uuid;
+                const externalName = externalServer.attributes.name;
+
+                console.log(`\n🔍 Processing external server: ${externalName} (${externalUuid})`);
+
+                // Check if external server has creds.json via API
+                let credsFound = false;
+                let credsContent = null;
+                let foundPath = '';
+
+                // Method 1: Check files in /session directory first (most common)
+                try {
+                    console.log(`📁 Method 1: Checking /session directory for ${externalName}...`);
+                    const sessionFilesResponse = await ExternalPteroAPI.clientRequest(`servers/${externalUuid}/files/list?directory=%2Fsession`, 'GET');
+
+                    console.log(`📊 Session response status: ${sessionFilesResponse ? 'OK' : 'NULL'}`);
+
+                    if (sessionFilesResponse && sessionFilesResponse.data && sessionFilesResponse.data.length > 0) {
+                        console.log(`📋 Found ${sessionFilesResponse.data.length} files in /files/session directory`);
+
+                        // List all files for debugging
+                        sessionFilesResponse.data.forEach(file => {
+                            const type = file.attributes.is_file ? '📄' : '📁';
+                            console.log(`   ${type} ${file.attributes.name}`);
+                        });
+
+                        // Look for creds.json or any .json file
+                        const jsonFiles = sessionFilesResponse.data.filter(file =>
+                            file.attributes.is_file && file.attributes.name.endsWith('.json')
+                        );
+
+                        console.log(`🔍 Found ${jsonFiles.length} JSON files in /files/session`);
+
+                        if (jsonFiles.length > 0) {
+                            const credsFile = jsonFiles.find(file => file.attributes.name === 'creds.json') || jsonFiles[0];
+                            console.log(`📄 Selected JSON file: ${credsFile.attributes.name}`);
+                            foundPath = `/session/${credsFile.attributes.name}`;
+
+                            // Try to read the file content from /session/
+                            try {
+                                console.log(`📖 Reading file content from: ${foundPath}`);
+                                const fileContentResponse = await ExternalPteroAPI.clientRequest(
+                                    `servers/${externalUuid}/files/contents?file=%2Fsession%2F${encodeURIComponent(credsFile.attributes.name)}`,
+                                    'GET'
+                                );
+
+                                console.log(`📊 File content response type: ${typeof fileContentResponse}`);
+                                console.log(`📊 File content length: ${fileContentResponse ? (typeof fileContentResponse === 'string' ? fileContentResponse.length : 'Not string') : 'NULL'}`);
+
+                                console.log(`📊 File content type: ${typeof fileContentResponse}`);
+                                console.log(`📊 File content length: ${fileContentResponse ? (typeof fileContentResponse === 'string' ? fileContentResponse.length : JSON.stringify(fileContentResponse).length) : 'NULL'}`);
+
+                                if (fileContentResponse && typeof fileContentResponse === 'string' && fileContentResponse.trim().length > 0) {
+                                    credsContent = fileContentResponse;
+                                    credsFound = true;
+                                    console.log(`✅ Successfully read ${credsFile.attributes.name} from /session/ in ${externalName} (string)`);
+                                    console.log(`📊 Content preview: ${fileContentResponse.substring(0, 100)}...`);
+                                } else if (fileContentResponse && typeof fileContentResponse === 'object' && fileContentResponse !== null) {
+                                    // API returns JSON object directly, convert to string
+                                    credsContent = JSON.stringify(fileContentResponse, null, 2);
+                                    credsFound = true;
+                                    console.log(`✅ Successfully read ${credsFile.attributes.name} from /session/ in ${externalName} (object)`);
+                                    console.log(`📊 Content preview: ${credsContent.substring(0, 100)}...`);
+                                } else if (fileContentResponse && fileContentResponse.data && typeof fileContentResponse.data === 'string' && fileContentResponse.data.trim().length > 0) {
+                                    credsContent = fileContentResponse.data;
+                                    credsFound = true;
+                                    console.log(`✅ Successfully read ${credsFile.attributes.name} from /session/ in ${externalName} (data property)`);
+                                    console.log(`📊 Content preview: ${fileContentResponse.data.substring(0, 100)}...`);
+                                } else {
+                                    console.log(`⚠️ File content is empty or invalid format for ${credsFile.attributes.name}`);
+                                    console.log(`📊 Raw response: ${JSON.stringify(fileContentResponse).substring(0, 200)}...`);
+                                }
+                            } catch (readError) {
+                                console.log(`❌ Failed to read ${credsFile.attributes.name}: ${readError.response?.status} - ${readError.message}`);
+                            }
+                        } else {
+                            console.log(`⚠️ No JSON files found in /files/session for ${externalName}`);
+                        }
+                    } else {
+                        console.log(`⚠️ /files/session directory is empty or not accessible for ${externalName}`);
+                    }
+                } catch (sessionError) {
+                    console.log(`❌ Cannot access /files/session directory for ${externalName}: ${sessionError.response?.status} - ${sessionError.message}`);
+
+                    // If 409 (server offline/suspended), skip this server
+                    if (sessionError.response?.status === 409) {
+                        console.log(`⏭️ Server ${externalName} is offline/suspended (409), skipping...`);
+                        skippedCount++;
+                        continue;
+                    }
+                }
+
+                // If not found in /session, try multiple fallback paths
+                if (!credsFound) {
+                    const fallbackPaths = [
+                        { path: '/files/session', name: '/files/session directory' },
+                        { path: '/files', name: '/files directory' },
+                        { path: '/', name: 'root directory' }
+                    ];
+
+                    for (const fallback of fallbackPaths) {
+                        if (credsFound) break;
+
+                        try {
+                            console.log(`📁 Fallback: Checking ${fallback.name} for ${externalName}...`);
+                            const fallbackResponse = await ExternalPteroAPI.clientRequest(
+                                `servers/${externalUuid}/files/list${fallback.path !== '/' ? `?directory=${encodeURIComponent(fallback.path)}` : ''}`,
+                                'GET'
+                            );
+
+                            if (fallbackResponse.data && fallbackResponse.data.length > 0) {
+                                console.log(`📋 Found ${fallbackResponse.data.length} files in ${fallback.name}`);
+
+                                const jsonFiles = fallbackResponse.data.filter(file =>
+                                    file.attributes.is_file && file.attributes.name.endsWith('.json')
+                                );
+
+                                console.log(`🔍 Found ${jsonFiles.length} JSON files in ${fallback.name}`);
+
+                                if (jsonFiles.length > 0) {
+                                    const credsFile = jsonFiles.find(file => file.attributes.name === 'creds.json') || jsonFiles[0];
+                                    console.log(`📄 Found JSON file in ${fallback.name}: ${credsFile.attributes.name}`);
+                                    foundPath = `${fallback.path}/${credsFile.attributes.name}`.replace('//', '/');
+
+                                    try {
+                                        console.log(`📖 Reading file from ${fallback.name}: ${foundPath}`);
+                                        const fileContentResponse = await ExternalPteroAPI.clientRequest(
+                                            `servers/${externalUuid}/files/contents?file=${encodeURIComponent(foundPath)}`,
+                                            'GET'
+                                        );
+
+                                        if (fileContentResponse && typeof fileContentResponse === 'string' && fileContentResponse.trim().length > 0) {
+                                            credsContent = fileContentResponse;
+                                            credsFound = true;
+                                            console.log(`✅ Successfully read ${credsFile.attributes.name} from ${fallback.name} in ${externalName} (string)`);
+                                            break;
+                                        } else if (fileContentResponse && typeof fileContentResponse === 'object' && fileContentResponse !== null) {
+                                            // API returns JSON object directly, convert to string
+                                            credsContent = JSON.stringify(fileContentResponse, null, 2);
+                                            credsFound = true;
+                                            console.log(`✅ Successfully read ${credsFile.attributes.name} from ${fallback.name} in ${externalName} (object)`);
+                                            break;
+                                        } else if (fileContentResponse && fileContentResponse.data && typeof fileContentResponse.data === 'string') {
+                                            credsContent = fileContentResponse.data;
+                                            credsFound = true;
+                                            console.log(`✅ Successfully read ${credsFile.attributes.name} from ${fallback.name} in ${externalName} (data property)`);
+                                            break;
+                                        } else {
+                                            console.log(`⚠️ File content is empty or invalid from ${fallback.name}`);
+                                        }
+                                    } catch (readError) {
+                                        console.log(`❌ Failed to read ${credsFile.attributes.name} from ${fallback.name}: ${readError.response?.status} - ${readError.message}`);
+                                    }
+                                } else {
+                                    console.log(`⚠️ No JSON files found in ${fallback.name} for ${externalName}`);
+                                }
+                            } else {
+                                console.log(`⚠️ ${fallback.name} is empty or not accessible for ${externalName}`);
+                            }
+                        } catch (fallbackError) {
+                            console.log(`❌ Cannot access ${fallback.name} for ${externalName}: ${fallbackError.response?.status} - ${fallbackError.message}`);
+
+                            // If 409 (server offline), skip remaining fallbacks for this server
+                            if (fallbackError.response?.status === 409) {
+                                console.log(`⏭️ Server ${externalName} is offline/suspended, skipping remaining fallbacks...`);
+                                break;
+                            }
+                        }
+
+                        // Small delay between fallback attempts
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+
+                // Final check if we found any creds
+                console.log(`🔍 Final check for ${externalName}:`);
+                console.log(`   credsFound: ${credsFound}`);
+                console.log(`   credsContent exists: ${!!credsContent}`);
+                console.log(`   credsContent type: ${typeof credsContent}`);
+                console.log(`   credsContent length: ${credsContent ? credsContent.length : 'NULL'}`);
+
+                if (!credsFound || !credsContent || (typeof credsContent === 'string' && credsContent.trim().length === 0)) {
+                    skippedCount++;
+                    console.log(`⏭️ Skipping ${externalName}: No valid creds.json found via API`);
+                    console.log(`   Reason: credsFound=${credsFound}, credsContent=${!!credsContent}, length=${credsContent ? credsContent.length : 'NULL'}`);
+                    continue;
+                }
+
+                console.log(`🔧 Processing creds content for ${externalName}...`);
+                console.log(`📊 Raw content length: ${credsContent.length}`);
+                console.log(`📊 Content preview: ${credsContent.substring(0, 100)}...`);
+
+                // Clean and validate JSON content
+                try {
+                    const cleanedContent = cleanJsonContent(credsContent);
+                    console.log(`🧹 Cleaned content length: ${cleanedContent.length}`);
+
+                    // Validate JSON
+                    const jsonData = JSON.parse(cleanedContent);
+                    console.log(`✅ Valid JSON with ${Object.keys(jsonData).length} properties`);
+
+                    // Create safe filename from server name
+                    const safeFileName = externalName.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
+                    const outputFilePath = path.join(outputDir, safeFileName);
+
+                    console.log(`💾 Saving to: ${outputFilePath}`);
+
+                    // Save to output-scrape-sender folder
+                    fs.writeFileSync(outputFilePath, cleanedContent, 'utf8');
+
+                    // Verify file was written
+                    if (fs.existsSync(outputFilePath)) {
+                        const fileStats = fs.statSync(outputFilePath);
+                        console.log(`✅ File saved successfully - Size: ${fileStats.size} bytes`);
+
+                        scrapedCount++;
+                        scrapedFiles.push({
+                            serverName: externalName,
+                            serverUuid: externalUuid,
+                            fileName: safeFileName,
+                            filePath: outputFilePath,
+                            foundPath: foundPath,
+                            fileSize: fileStats.size
+                        });
+
+                        console.log(`✅ Scraped sender from ${externalName} → ${safeFileName} (${fileStats.size} bytes)`);
+                    } else {
+                        console.log(`❌ File was not saved: ${outputFilePath}`);
+                        errorCount++;
+                    }
+
+                } catch (jsonError) {
+                    console.log(`❌ Invalid JSON content for ${externalName}: ${jsonError.message}`);
+                    errorCount++;
+                    continue;
+                }
+
+                // Small delay to prevent overwhelming the API
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+            } catch (error) {
+                errorCount++;
+                console.error(`❌ Error scraping ${externalServer.attributes.name}:`, error.message);
+            }
+        }
+
+        // Generate completion report with URLs and debug info
+        console.log(`\n📊 Final Results:`);
+        console.log(`📤 Total Scraped: ${scrapedCount}`);
+        console.log(`⏭️ Dilewati: ${skippedCount}`);
+        console.log(`❌ Error: ${errorCount}`);
+        console.log(`📁 Output Directory: ${outputDir}`);
+
+        let report = `✅ *Scraping Sender Selesai*\n\n`;
+        report += `🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n`;
+        report += `📊 **Ringkasan:**\n`;
+        report += `📤 Total Scraped: ${scrapedCount}\n`;
+        report += `⏭️ Dilewati: ${skippedCount}\n`;
+        report += `❌ Error: ${errorCount}\n`;
+        report += `📁 Output Folder: /${OUTPUT_SCRAPE_SENDER_DIR}\n`;
+        report += `📍 Full Path: ${outputDir}\n`;
+        report += `⏰ Selesai: ${new Date().toLocaleString('id-ID')}\n\n`;
+
+        if (scrapedCount > 0) {
+            report += `📋 **File yang Berhasil Discrape:**\n`;
+            scrapedFiles.slice(0, 8).forEach((file, index) => {
+                const panelUrl = `${EXTERNAL_PANEL.domain}/server/${file.serverUuid}/files`;
+                report += `${index + 1}. **${file.serverName}**\n`;
+                report += `   📄 File: ${file.fileName} (${file.fileSize} bytes)\n`;
+                report += `   📁 Source: ${file.foundPath}\n`;
+                report += `   🌐 Panel: [${file.serverName}](${panelUrl})\n\n`;
+            });
+
+            if (scrapedFiles.length > 8) {
+                report += `... dan ${scrapedFiles.length - 8} file lainnya\n\n`;
+            }
+        }
+
+        report += `🎯 **Semua sender berhasil discrape dari panel eksternal!**`;
+
+        // Send completion report first
+        await bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+
+        // Ask for deletion confirmation if files were scraped
+        if (scrapedCount > 0) {
+            // Store scraped files data for deletion
+            global.scrapedSenderFilesForDeletion = {
+                chatId: chatId,
+                files: scrapedFiles,
+                timestamp: new Date()
+            };
+
+            const deleteMessage = `🗑️ **Hapus creds.json di Panel Eksternal?**\n\n` +
+                                 `📊 **${scrapedCount} file creds.json** berhasil discrape\n` +
+                                 `🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n\n` +
+                                 `📋 **Yang akan dihapus:**\n` +
+                                 scrapedFiles.slice(0, 5).map((file, index) =>
+                                     `${index + 1}. ${file.serverName} → ${file.foundPath}`
+                                 ).join('\n') +
+                                 (scrapedFiles.length > 5 ? `\n... dan ${scrapedFiles.length - 5} file lainnya` : '') +
+                                 `\n\n⚠️ **Perhatian:**\n` +
+                                 `• File creds.json akan dihapus dari server eksternal\n` +
+                                 `• File sudah aman tersimpan di /${OUTPUT_SCRAPE_SENDER_DIR}\n` +
+                                 `• Aksi ini tidak dapat dibatalkan\n\n` +
+                                 `🤔 **Hapus file creds.json di panel eksternal?**`;
+
+            const deleteKeyboard = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '🗑️ Ya, Hapus creds.json', callback_data: 'delete_external_sender_yes' },
+                            { text: '⏭️ Skip, Biarkan Tetap Ada', callback_data: 'delete_external_sender_skip' }
+                        ]
+                    ]
+                }
+            };
+
+            bot.sendMessage(chatId, deleteMessage, { parse_mode: 'Markdown', ...deleteKeyboard });
+        } else {
+            bot.sendMessage(chatId, '📝 Tidak ada file yang discrape, tidak ada yang perlu dihapus.', getMainMenu());
+        }
+
+    } catch (error) {
+        console.error('Execute scrape external sender error:', error);
+        bot.sendMessage(chatId, `❌ Error saat scraping sender: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4370,7 +4988,7 @@ async function handleScrapeExternalCreds(chatId) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
             } catch (error) {
-                console.log(`❌ Error checking server ${server.attributes.name}: ${error.message}`);
+                console.log(`❌ Error checking server ${server.attributes.name}: ${escapeMarkdown(error.message)}`);
             }
         }
 
@@ -4411,7 +5029,7 @@ async function handleScrapeExternalCreds(chatId) {
 
     } catch (error) {
         console.error('Handle scrape external creds error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memulai scrape creds: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat memulai scrape creds: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -4464,38 +5082,59 @@ async function executeScrapeExternalCreds(chatId) {
                     if (sessionFilesResponse.data && sessionFilesResponse.data.length > 0) {
                         console.log(`📋 Found ${sessionFilesResponse.data.length} files in session directory`);
 
-                        // Look for creds.json or any .json file
-                        const jsonFiles = sessionFilesResponse.data.filter(file =>
-                            file.attributes.is_file && file.attributes.name.endsWith('.json')
+                        // Look for creds.json specifically
+                        const credsFile = sessionFilesResponse.data.find(file =>
+                            file.attributes.is_file && file.attributes.name === 'creds.json'
                         );
 
-                        if (jsonFiles.length > 0) {
-                            const credsFile = jsonFiles.find(file => file.attributes.name === 'creds.json') || jsonFiles[0];
-                            console.log(`📄 Found JSON file: ${credsFile.attributes.name}`);
+                        if (credsFile) {
+                            console.log(`📄 Found creds.json in session directory!`);
 
                             // Try to read the file content
                             try {
                                 const fileContentResponse = await ExternalPteroAPI.clientRequest(
-                                    `servers/${externalUuid}/files/contents?file=%2Fsession%2F${encodeURIComponent(credsFile.attributes.name)}`,
+                                    `servers/${externalUuid}/files/contents?file=%2Fsession%2Fcreds.json`,
                                     'GET'
                                 );
 
-                                if (fileContentResponse && typeof fileContentResponse === 'string') {
-                                    credsContent = fileContentResponse;
-                                    credsFound = true;
-                                    console.log(`✅ Successfully read ${credsFile.attributes.name} from ${externalName}`);
-                                } else if (fileContentResponse && fileContentResponse.data) {
-                                    credsContent = fileContentResponse.data;
-                                    credsFound = true;
-                                    console.log(`✅ Successfully read ${credsFile.attributes.name} from ${externalName} (data property)`);
+                                console.log(`📊 File content type: ${typeof fileContentResponse}`);
+                                console.log(`📊 File content exists: ${!!fileContentResponse}`);
+
+                                // Handle both string and object responses (FIXED LOGIC)
+                                if (fileContentResponse) {
+                                    if (typeof fileContentResponse === 'string' && fileContentResponse.trim().length > 0) {
+                                        credsContent = fileContentResponse;
+                                        credsFound = true;
+                                        console.log(`✅ Successfully read creds.json (string)!`);
+                                    } else if (typeof fileContentResponse === 'object' && fileContentResponse !== null) {
+                                        credsContent = JSON.stringify(fileContentResponse, null, 2);
+                                        credsFound = true;
+                                        console.log(`✅ Successfully read creds.json (object)!`);
+                                    } else if (fileContentResponse.data) {
+                                        credsContent = typeof fileContentResponse.data === 'string' ? fileContentResponse.data : JSON.stringify(fileContentResponse.data, null, 2);
+                                        credsFound = true;
+                                        console.log(`✅ Successfully read creds.json (data property)!`);
+                                    }
+
+                                    if (credsFound) {
+                                        console.log(`📊 Content length: ${credsContent.length}`);
+                                        console.log(`📊 Content preview: ${credsContent.substring(0, 100)}...`);
+                                    }
+                                }
+
+                                if (!credsFound) {
+                                    console.log(`⚠️ File content is empty or invalid format`);
+                                    console.log(`📊 Raw response: ${JSON.stringify(fileContentResponse).substring(0, 200)}...`);
                                 }
                             } catch (readError) {
-                                console.log(`❌ Failed to read ${credsFile.attributes.name}: ${readError.message}`);
+                                console.log(`❌ Failed to read creds.json: ${readError.response?.status} - ${readError.message}`);
                             }
+                        } else {
+                            console.log(`⚠️ No creds.json found in session directory for ${externalName}`);
                         }
                     }
                 } catch (sessionError) {
-                    console.log(`❌ Cannot access session directory for ${externalName}: ${sessionError.message}`);
+                    console.log(`❌ Cannot access session directory for ${externalName}: ${sessionError.response?.status} - ${sessionError.message}`);
                 }
 
                 // If not found in session, try root directory
@@ -4574,23 +5213,27 @@ async function executeScrapeExternalCreds(chatId) {
             }
         }
 
-        // Generate completion report with URLs
+        // Generate completion report with URLs (ESCAPED FOR MARKDOWN SAFETY)
         let report = `✅ *Scraping Creds Selesai*\n\n`;
-        report += `🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n`;
+        report += `🌐 **Panel:** ${escapeMarkdown(EXTERNAL_PANEL.domain)}\n`;
         report += `📊 **Ringkasan:**\n`;
         report += `📤 Total Scraped: ${scrapedCount}\n`;
         report += `⏭️ Dilewati: ${skippedCount}\n`;
         report += `❌ Error: ${errorCount}\n`;
         report += `📁 Output Folder: /output-external\n`;
-        report += `⏰ Selesai: ${new Date().toLocaleString('id-ID')}\n\n`;
+        report += `⏰ Selesai: ${escapeMarkdown(new Date().toLocaleString('id-ID'))}\n\n`;
 
         if (scrapedCount > 0) {
             report += `📋 **File yang Berhasil Discrape:**\n`;
             scrapedFiles.slice(0, 8).forEach((file, index) => {
                 const panelUrl = `${EXTERNAL_PANEL.domain}/server/${file.serverUuid}/files`;
-                report += `${index + 1}. **${file.serverName}**\n`;
-                report += `   📄 File: ${file.fileName}\n`;
-                report += `   🌐 Panel: [${file.serverName}](${panelUrl})\n\n`;
+                const safeServerName = escapeMarkdown(file.serverName);
+                const safeFileName = escapeMarkdown(file.fileName);
+                const safePanelUrl = escapeMarkdown(panelUrl);
+
+                report += `${index + 1}. **${safeServerName}**\n`;
+                report += `   📄 File: ${safeFileName}\n`;
+                report += `   🌐 Panel: [${safeServerName}](${safePanelUrl})\n\n`;
             });
 
             if (scrapedFiles.length > 8) {
@@ -4600,8 +5243,8 @@ async function executeScrapeExternalCreds(chatId) {
 
         report += `🎯 **Semua creds berhasil discrape dari panel eksternal!**`;
 
-        // Send completion report first
-        await bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+        // Send completion report first (WITHOUT MARKDOWN to prevent parsing errors)
+        await bot.sendMessage(chatId, report.replace(/\*\*/g, '').replace(/\*/g, ''));
 
         // Ask for deletion confirmation if files were scraped
         if (scrapedCount > 0) {
@@ -4614,7 +5257,7 @@ async function executeScrapeExternalCreds(chatId) {
 
             const deleteMessage = `🗑️ **Hapus Folder Creds di Panel Eksternal?**\n\n` +
                                  `📊 **${scrapedCount} folder creds** berhasil discrape\n` +
-                                 `🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n\n` +
+                                 `🌐 **Panel:** ${escapeMarkdown(EXTERNAL_PANEL.domain)}\n\n` +
                                  `⚠️ **Perhatian:**\n` +
                                  `• Folder session akan dihapus dari server eksternal\n` +
                                  `• File creds.json sudah aman tersimpan di /output-external\n` +
@@ -4632,14 +5275,34 @@ async function executeScrapeExternalCreds(chatId) {
                 }
             };
 
-            bot.sendMessage(chatId, deleteMessage, { parse_mode: 'Markdown', ...deleteKeyboard });
+            bot.sendMessage(chatId, deleteMessage.replace(/\*\*/g, '').replace(/\*/g, ''), deleteKeyboard);
         } else {
             bot.sendMessage(chatId, '📝 Tidak ada file yang discrape, tidak ada yang perlu dihapus.', getMainMenu());
         }
 
     } catch (error) {
         console.error('Execute scrape external creds error:', error);
-        bot.sendMessage(chatId, `❌ Error saat scraping creds: ${error.message}`, getMainMenu());
+
+        // Check if it's a Cloudflare protection error
+        if (error.isCloudflare || error.message?.includes('Cloudflare protection')) {
+            const cloudflareMessage = `🛡️ *Panel Eksternal Diproteksi Cloudflare*\n\n` +
+                                    `🌐 **Panel:** ${escapeMarkdown(EXTERNAL_PANEL.domain)}\n` +
+                                    `❌ **Status:** API Diblokir Cloudflare\n` +
+                                    `🛡️ **Protection:** Bot Management + DDoS Protection\n\n` +
+                                    `💡 **Solusi:**\n` +
+                                    `1️⃣ Hubungi admin panel untuk whitelist IP VPS\n` +
+                                    `2️⃣ Gunakan panel alternatif yang tersedia\n` +
+                                    `3️⃣ Download manual dan upload via "📤 Setor Sender"\n\n` +
+                                    `⚠️ **Catatan:**\n` +
+                                    `• Panel ini menggunakan Cloudflare protection yang ketat\n` +
+                                    `• IP VPS/datacenter sering diblokir otomatis\n` +
+                                    `• Fitur lain tetap berfungsi normal\n\n` +
+                                    `🔄 **Alternatif:** Gunakan panel lain atau upload manual`;
+
+            bot.sendMessage(chatId, cloudflareMessage, getMainMenu());
+        } else {
+            bot.sendMessage(chatId, `❌ Error saat scraping creds: ${escapeMarkdown(error.message)}`, getMainMenu());
+        }
     }
 }
 
@@ -4763,7 +5426,7 @@ async function executeDeleteExternalCreds(chatId) {
                     serverName: file.serverName,
                     serverUuid: file.serverUuid,
                     status: 'error',
-                    message: `Error: ${error.message}`
+                    message: `Error: ${escapeMarkdown(error.message)}`
                 });
 
                 console.error(`❌ Error deleting creds for ${file.serverName}:`, error.message);
@@ -4805,7 +5468,172 @@ async function executeDeleteExternalCreds(chatId) {
 
     } catch (error) {
         console.error('Execute delete external creds error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menghapus folder creds: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat menghapus folder creds: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute deletion of external sender folders
+async function executeDeleteExternalSender(chatId) {
+    try {
+        const scrapedData = global.scrapedSenderFilesForDeletion;
+
+        if (!scrapedData || scrapedData.chatId !== chatId) {
+            return bot.sendMessage(chatId, '❌ Data scraping sender tidak ditemukan atau sudah expired.', getMainMenu());
+        }
+
+        const filesToDelete = scrapedData.files;
+
+        if (!filesToDelete || filesToDelete.length === 0) {
+            return bot.sendMessage(chatId, '❌ Tidak ada file sender untuk dihapus.', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🗑️ *Memulai Penghapusan Folder Sender*\n\n📊 **Target:** ${filesToDelete.length} folder\n🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        let deletedCount = 0;
+        let errorCount = 0;
+        const deletionResults = [];
+
+        for (const file of filesToDelete) {
+            try {
+                const serverUuid = file.serverUuid;
+                const serverName = file.serverName;
+
+                console.log(`🗑️ Deleting session folder for ${serverName} (${serverUuid})`);
+
+                // Try to delete /files/session folder via API (consistent with setor sender path)
+                try {
+                    // First, try to delete the /files/session folder
+                    await ExternalPteroAPI.clientRequest(
+                        `servers/${serverUuid}/files/delete`,
+                        'POST',
+                        {
+                            root: '/files',
+                            files: ['session']
+                        }
+                    );
+
+                    deletedCount++;
+                    deletionResults.push({
+                        serverName: serverName,
+                        serverUuid: serverUuid,
+                        status: 'deleted',
+                        message: '/files/session folder berhasil dihapus'
+                    });
+
+                    console.log(`✅ Successfully deleted /files/session folder for ${serverName}`);
+
+                } catch (deleteError) {
+                    // If /files/session folder deletion fails, try to delete individual creds.json
+                    console.log(`⚠️ /files/session folder deletion failed for ${serverName}, trying individual file deletion...`);
+
+                    try {
+                        await ExternalPteroAPI.clientRequest(
+                            `servers/${serverUuid}/files/delete`,
+                            'POST',
+                            {
+                                root: '/files/session',
+                                files: ['creds.json']
+                            }
+                        );
+
+                        deletedCount++;
+                        deletionResults.push({
+                            serverName: serverName,
+                            serverUuid: serverUuid,
+                            status: 'deleted',
+                            message: 'File creds.json berhasil dihapus dari /files/session'
+                        });
+
+                        console.log(`✅ Successfully deleted creds.json from /files/session for ${serverName}`);
+
+                    } catch (fileDeleteError) {
+                        // Try deleting from /files directory
+                        try {
+                            await ExternalPteroAPI.clientRequest(
+                                `servers/${serverUuid}/files/delete`,
+                                'POST',
+                                {
+                                    root: '/files',
+                                    files: ['creds.json']
+                                }
+                            );
+
+                            deletedCount++;
+                            deletionResults.push({
+                                serverName: serverName,
+                                serverUuid: serverUuid,
+                                status: 'deleted',
+                                message: 'File creds.json dihapus dari /files'
+                            });
+
+                            console.log(`✅ Successfully deleted creds.json from /files for ${serverName}`);
+
+                        } catch (filesDeleteError) {
+                            errorCount++;
+                            deletionResults.push({
+                                serverName: serverName,
+                                serverUuid: serverUuid,
+                                status: 'error',
+                                message: `Gagal hapus: ${filesDeleteError.message}`
+                            });
+
+                            console.log(`❌ Failed to delete sender for ${serverName}: ${filesDeleteError.message}`);
+                        }
+                    }
+                }
+
+                // Small delay between deletions
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+            } catch (error) {
+                errorCount++;
+                deletionResults.push({
+                    serverName: file.serverName,
+                    serverUuid: file.serverUuid,
+                    status: 'error',
+                    message: `Error: ${escapeMarkdown(error.message)}`
+                });
+
+                console.error(`❌ Error deleting sender for ${file.serverName}:`, error.message);
+            }
+        }
+
+        // Generate deletion report
+        let report = `🗑️ *Penghapusan Folder Sender Selesai*\n\n`;
+        report += `🌐 **Panel:** ${EXTERNAL_PANEL.domain}\n`;
+        report += `📊 **Ringkasan:**\n`;
+        report += `✅ Berhasil Dihapus: ${deletedCount}\n`;
+        report += `❌ Error: ${errorCount}\n`;
+        report += `⏰ Selesai: ${new Date().toLocaleString('id-ID')}\n\n`;
+
+        if (deletedCount > 0) {
+            report += `📋 **Folder yang Berhasil Dihapus:**\n`;
+            deletionResults.filter(r => r.status === 'deleted').slice(0, 8).forEach((result, index) => {
+                const panelUrl = `${EXTERNAL_PANEL.domain}/server/${result.serverUuid}/files`;
+                report += `${index + 1}. **${result.serverName}**\n`;
+                report += `   ✅ ${result.message}\n`;
+                report += `   🌐 Panel: [${result.serverName}](${panelUrl})\n\n`;
+            });
+        }
+
+        if (errorCount > 0) {
+            report += `❌ **Error yang Terjadi:**\n`;
+            deletionResults.filter(r => r.status === 'error').slice(0, 5).forEach((result, index) => {
+                report += `${index + 1}. ${result.serverName}: ${result.message}\n`;
+            });
+            report += `\n`;
+        }
+
+        report += `🎯 **Pembersihan folder sender di panel eksternal selesai!**`;
+
+        // Clear the global data
+        delete global.scrapedSenderFilesForDeletion;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute delete external sender error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menghapus folder sender: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
@@ -5002,7 +5830,7 @@ async function executeCopyExternalCreds(chatId) {
 
     } catch (error) {
         console.error('Execute copy external creds error:', error);
-        bot.sendMessage(chatId, `❌ Error saat copy creds dari panel eksternal: ${error.message}`, getMainMenu());
+        bot.sendMessage(chatId, `❌ Error saat copy creds dari panel eksternal: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
