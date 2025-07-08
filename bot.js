@@ -134,6 +134,11 @@ const PANEL_URL = process.env.PANEL_URL;
 const APP_API_KEY = process.env.APP_API_KEY;
 const CLIENT_API_KEY = process.env.CLIENT_API_KEY;
 
+// Main Panel Server Configuration
+const MAIN_PANEL_LOCATION = process.env.MAIN_PANEL_LOCATION || 1;
+const MAIN_PANEL_NEST = process.env.MAIN_PANEL_NEST || 6;
+const MAIN_PANEL_EGG = process.env.MAIN_PANEL_EGG || 19;
+
 // External Panel Configuration
 const EXTERNAL_PANEL_DOMAIN = process.env.EXTERNAL_PANEL_DOMAIN;
 const EXTERNAL_PANEL_PLTA = process.env.EXTERNAL_PANEL_PLTA;
@@ -653,6 +658,16 @@ class PteroAPI {
         }
     }
 
+    static async getAvailableAllocations() {
+        try {
+            const response = await this.appRequest('allocations', 'GET');
+            return response.data;
+        } catch (error) {
+            console.error('Failed to get allocations:', error.response?.data || error.message);
+            return [];
+        }
+    }
+
     static async getUsers() {
         try {
             const response = await this.appRequest('users');
@@ -748,6 +763,9 @@ function getMainMenu() {
                 [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
                     { text: '🏥 Cek Kesehatan', callback_data: 'health_check' }
+                ],
+                [
+                    { text: '🆕 Create Server untuk User', callback_data: 'create_user_server' }
                 ]
             ]
         }
@@ -1271,6 +1289,9 @@ bot.on('callback_query', async (query) => {
         case 'health_check':
             await handleHealthCheck(chatId);
             break;
+        case 'create_user_server':
+            await handleCreateUserServerCustom(chatId);
+            break;
         case 'test_api':
             await handleTestAPI(chatId);
             break;
@@ -1422,6 +1443,35 @@ Selamat datang! Pilih aksi yang diinginkan:`;
                 const userId = parts[1];
                 const quantity = parts[2];
                 await executeCreateServers(chatId, userId, quantity);
+            }
+            // Handle custom_create_server_*_* callbacks (userId_quantity) - MUST BE FIRST!
+            else if (data.startsWith('custom_create_server_') && data.includes('_') && data.split('_').length >= 5) {
+                console.log('🔍 DEBUG: Custom create server callback received');
+                console.log('🔍 DEBUG: Callback data:', data);
+                const parts = data.split('_');
+                console.log('🔍 DEBUG: Split parts:', parts);
+                console.log('🔍 DEBUG: Parts length:', parts.length);
+                const userId = parts[3];
+                const quantity = parts[4];
+                console.log('🔍 DEBUG: Extracted userId:', userId);
+                console.log('🔍 DEBUG: Extracted quantity:', quantity);
+                await executeCustomCreateServers(chatId, userId, quantity);
+            }
+            // Handle custom_create_ callbacks (but NOT custom_create_server_)
+            else if (data.startsWith('custom_create_') && !data.startsWith('custom_create_server_')) {
+                const userId = data.replace('custom_create_', '');
+                await handleCustomCreateServerForUser(chatId, userId);
+            }
+            // Handle custom_more_users callback
+            else if (data === 'custom_more_users') {
+                await handleCustomMoreUsers(chatId);
+            }
+            // Handle confirm_custom_create callbacks
+            else if (data.startsWith('confirm_custom_create_')) {
+                const parts = data.replace('confirm_custom_create_', '').split('_');
+                const userId = parts[0];
+                const quantity = parts[1];
+                await executeConfirmCustomCreateServers(chatId, userId, quantity);
             }
             else {
                 bot.sendMessage(chatId, '❓ Aksi tidak dikenal.', getMainMenu());
@@ -2084,6 +2134,405 @@ async function handleCreateUserServer(chatId) {
     } catch (error) {
         console.error('Create user server error:', error);
         bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Create User Server Custom (New Enhanced Version)
+async function handleCreateUserServerCustom(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `🆕 *Create Server untuk User Spesifik*\n\n`;
+        text += `🎯 **Fitur Custom:**\n`;
+        text += `• Pilih user spesifik\n`;
+        text += `• Custom jumlah server (1-50)\n`;
+        text += `• Resource unlimited (RAM, CPU, Disk)\n`;
+        text += `• IO Performance maksimal (1000)\n`;
+        text += `• Auto session folder creation\n\n`;
+        text += `📊 **Total User Tersedia:** ${users.length}\n\n`;
+        text += `👤 **Pilih user untuk dibuatkan server:**\n\n`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users with better formatting
+        const displayUsers = users.slice(0, 10);
+        for (let i = 0; i < displayUsers.length; i++) {
+            const user = displayUsers[i];
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name}`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `custom_create_${user.attributes.id}`
+            }]);
+        }
+
+        // Add more users button if there are more than 10
+        if (users.length > 10) {
+            keyboard.reply_markup.inline_keyboard.push([
+                { text: '👥 Lihat Semua User', callback_data: 'custom_more_users' }
+            ]);
+        }
+
+        // Add back button
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Create user server custom error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Handle Custom Create Server for Specific User
+async function handleCustomCreateServerForUser(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        const text = `🆕 *Create Server untuk User*\n\n` +
+                    `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                    `📧 **Email:** ${user.attributes.email}\n` +
+                    `🆔 **ID:** ${user.attributes.id}\n\n` +
+                    `🎯 **Spesifikasi Server:**\n` +
+                    `• RAM: Unlimited (0)\n` +
+                    `• CPU: Unlimited (0)\n` +
+                    `• Disk: Unlimited (0)\n` +
+                    `• IO: 1000 (Maksimal Performance)\n` +
+                    `• Swap: 0\n` +
+                    `• Databases: 0\n` +
+                    `• Allocations: 0\n` +
+                    `• Backups: 0\n\n` +
+                    `📊 **Berapa server yang ingin dibuat?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '1️⃣ 1 Server', callback_data: `custom_create_server_${userId}_1` },
+                        { text: '2️⃣ 2 Server', callback_data: `custom_create_server_${userId}_2` },
+                        { text: '3️⃣ 3 Server', callback_data: `custom_create_server_${userId}_3` }
+                    ],
+                    [
+                        { text: '5️⃣ 5 Server', callback_data: `custom_create_server_${userId}_5` },
+                        { text: '🔟 10 Server', callback_data: `custom_create_server_${userId}_10` },
+                        { text: '🔢 15 Server', callback_data: `custom_create_server_${userId}_15` }
+                    ],
+                    [
+                        { text: '📈 20 Server', callback_data: `custom_create_server_${userId}_20` },
+                        { text: '🚀 25 Server', callback_data: `custom_create_server_${userId}_25` },
+                        { text: '💯 50 Server', callback_data: `custom_create_server_${userId}_50` }
+                    ],
+                    [
+                        { text: '🔙 Kembali', callback_data: 'create_user_server' },
+                        { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle custom create server for user error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Handle Custom More Users
+async function handleCustomMoreUsers(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `👥 *Semua User untuk Custom Server*\n\n`;
+        text += `📊 **Total:** ${users.length} user\n\n`;
+        text += `🎯 **Spesifikasi Server:**\n`;
+        text += `• Resource unlimited (RAM, CPU, Disk)\n`;
+        text += `• IO Performance maksimal (1000)\n`;
+        text += `• Auto session folder creation\n\n`;
+        text += `👤 **Pilih user:**\n\n`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show all users in pages
+        for (let i = 0; i < Math.min(users.length, 20); i++) {
+            const user = users[i];
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name}`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `custom_create_${user.attributes.id}`
+            }]);
+        }
+
+        // Add navigation buttons
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🔙 Kembali', callback_data: 'create_user_server' },
+            { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle custom more users error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute Custom Create Servers with Unlimited Resources
+async function executeCustomCreateServers(chatId, userId, quantity) {
+    try {
+        console.log('🔍 DEBUG: executeCustomCreateServers called');
+        console.log('🔍 DEBUG: chatId:', chatId);
+        console.log('🔍 DEBUG: userId:', userId, 'type:', typeof userId);
+        console.log('🔍 DEBUG: quantity:', quantity, 'type:', typeof quantity);
+
+        const users = await PteroAPI.getUsers();
+        console.log('🔍 DEBUG: Total users found:', users.length);
+        console.log('🔍 DEBUG: First few users:', users.slice(0, 3).map(u => ({ id: u.attributes.id, name: u.attributes.first_name + ' ' + u.attributes.last_name })));
+
+        const user = users.find(u => u.attributes.id == userId);
+        console.log('🔍 DEBUG: User lookup result:', user ? { id: user.attributes.id, name: user.attributes.first_name + ' ' + user.attributes.last_name } : 'NOT FOUND');
+
+        if (!user) {
+            console.log('❌ DEBUG: User not found, sending error message');
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        const serverCount = parseInt(quantity);
+        if (isNaN(serverCount) || serverCount < 1 || serverCount > 50) {
+            return bot.sendMessage(chatId, '❌ Jumlah server tidak valid! (1-50)', getMainMenu());
+        }
+
+        const confirmText = `🆕 *Konfirmasi Create Server Custom*\n\n` +
+                          `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                          `📧 **Email:** ${user.attributes.email}\n` +
+                          `🆔 **User ID:** ${user.attributes.id}\n\n` +
+                          `📊 **Jumlah Server:** ${serverCount}\n\n` +
+                          `🎯 **Spesifikasi per Server:**\n` +
+                          `• RAM: Unlimited (0)\n` +
+                          `• CPU: Unlimited (0)\n` +
+                          `• Disk: Unlimited (0)\n` +
+                          `• IO: 1000 (Maksimal Performance)\n` +
+                          `• Swap: 0\n` +
+                          `• Databases: 0\n` +
+                          `• Allocations: 0\n` +
+                          `• Backups: 0\n\n` +
+                          `🔧 **Fitur Tambahan:**\n` +
+                          `• Auto session folder creation\n` +
+                          `• Optimized for maximum performance\n\n` +
+                          `⚠️ **Estimasi waktu:** ${Math.ceil(serverCount * 3)} detik\n\n` +
+                          `🚀 **Lanjutkan pembuatan server?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Buat Server', callback_data: `confirm_custom_create_${userId}_${quantity}` },
+                        { text: '❌ Batal', callback_data: 'create_user_server' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, confirmText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Execute custom create servers error:', error);
+
+        // Create safe error message
+        let errorMessage = 'Unknown error occurred';
+        if (error && error.message) {
+            errorMessage = error.message;
+        } else if (typeof error === 'string') {
+            errorMessage = error;
+        }
+
+        // Escape the error message properly
+        const safeErrorMessage = escapeMarkdown(errorMessage);
+
+        bot.sendMessage(chatId, `❌ Error: ${safeErrorMessage}`, getMainMenu());
+    }
+}
+
+// Execute Confirm Custom Create Servers
+async function executeConfirmCustomCreateServers(chatId, userId, quantity) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        const serverCount = parseInt(quantity);
+        if (isNaN(serverCount) || serverCount < 1 || serverCount > 50) {
+            return bot.sendMessage(chatId, '❌ Jumlah server tidak valid! (1-50)', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🚀 *Memulai Pembuatan Server Custom*\n\n👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n📊 **Jumlah:** ${serverCount} server\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        let successCount = 0;
+        let failedCount = 0;
+        const createdServers = [];
+        const failedServers = [];
+
+        for (let i = 1; i <= serverCount; i++) {
+            try {
+                // Generate unique server name
+                const timestamp = Date.now();
+                const serverName = `Server-${user.attributes.first_name}-${i}-${timestamp}`;
+
+                console.log(`Creating custom server ${i}/${serverCount} for user ${user.attributes.email}: ${serverName}`);
+
+                // Custom server data with unlimited resources
+                const serverData = {
+                    name: serverName,
+                    user: user.attributes.id,
+                    egg: MAIN_PANEL_EGG,
+                    docker_image: "ghcr.io/parkervcp/yolks:nodejs_24",
+                    startup: "if [[ -d .git ]] && [[ {{AUTO_UPDATE}} == \"1\" ]]; then git pull; fi; if [[ ! -z ${NODE_PACKAGES} ]]; then /usr/local/bin/npm install ${NODE_PACKAGES}; fi; if [[ ! -z ${UNNODE_PACKAGES} ]]; then /usr/local/bin/npm uninstall ${UNNODE_PACKAGES}; fi; if [ -f /home/container/package.json ]; then /usr/local/bin/npm install; fi;  if [[ ! -z ${CUSTOM_ENVIRONMENT_VARIABLES} ]]; then      vars=$(echo ${CUSTOM_ENVIRONMENT_VARIABLES} | tr \";\" \"\\n\");      for line in $vars;     do export $line;     done fi;  /usr/local/bin/${CMD_RUN};",
+                    environment: {
+                        "GIT_ADDRESS": "",
+                        "BRANCH": "",
+                        "USERNAME": "",
+                        "ACCESS_TOKEN": "",
+                        "CMD_RUN": "node index.js"
+                    },
+                    limits: {
+                        memory: 0,        // Unlimited RAM
+                        swap: 0,          // No swap
+                        disk: 0,          // Unlimited disk
+                        io: 1000,         // Maximum IO performance
+                        cpu: 0,           // Unlimited CPU
+                        threads: null,
+                        oom_disabled: true
+                    },
+                    feature_limits: {
+                        databases: 0,     // No databases
+                        allocations: 1,   // Allow 1 allocation for server to work
+                        backups: 0        // No backups
+                    },
+                    deploy: {
+                        locations: [MAIN_PANEL_LOCATION],
+                        dedicated_ip: false,
+                        port_range: []
+                    }
+                };
+
+                console.log(`📊 Server data being sent:`, JSON.stringify(serverData, null, 2));
+                const createdServer = await PteroAPI.createServer(serverData);
+                successCount++;
+                createdServers.push(serverName);
+
+                // Create session folder for the new server
+                try {
+                    if (createdServer && createdServer.attributes && createdServer.attributes.uuid) {
+                        console.log(`Creating session folder for ${serverName} (${createdServer.attributes.uuid})`);
+                        await PteroAPI.createSessionFolder(createdServer.attributes.uuid);
+                        console.log(`✅ Session folder created for ${serverName}`);
+                    }
+                } catch (sessionError) {
+                    console.log(`⚠️ Failed to create session folder for ${serverName}: ${sessionError.message}`);
+                }
+
+                console.log(`✅ Successfully created custom server: ${serverName}`);
+
+                // Add delay between server creation to avoid rate limiting
+                if (i < serverCount) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+
+            } catch (serverError) {
+                console.error(`❌ Failed to create server ${i}:`, serverError);
+
+                // Enhanced error handling for allocation issues
+                let errorMessage = serverError.message;
+                if (serverError.response?.status === 422) {
+                    const errorData = serverError.response.data;
+                    if (errorData && errorData.errors) {
+                        // Extract specific validation errors
+                        const validationErrors = Object.entries(errorData.errors)
+                            .map(([field, messages]) => `${field}: ${messages.join(', ')}`)
+                            .join('; ');
+                        errorMessage = `Validation Error: ${validationErrors}`;
+                    }
+                }
+
+                failedCount++;
+                failedServers.push(`Server-${i}: ${errorMessage}`);
+            }
+        }
+
+        // Generate final report
+        let report = `🎉 *Pembuatan Server Custom Selesai*\n\n`;
+        report += `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n`;
+        report += `📧 **Email:** ${user.attributes.email}\n\n`;
+        report += `📊 **Hasil:**\n`;
+        report += `✅ Berhasil: ${successCount}\n`;
+        report += `❌ Gagal: ${failedCount}\n`;
+        report += `📈 Total: ${serverCount}\n\n`;
+
+        if (successCount > 0) {
+            report += `🎯 **Server yang Berhasil Dibuat:**\n`;
+            createdServers.slice(0, 10).forEach((server, index) => {
+                report += `${index + 1}. ${server}\n`;
+            });
+            if (createdServers.length > 10) {
+                report += `... dan ${createdServers.length - 10} server lainnya\n`;
+            }
+            report += `\n`;
+        }
+
+        if (failedCount > 0) {
+            report += `❌ **Server yang Gagal:**\n`;
+            failedServers.slice(0, 5).forEach((error, index) => {
+                report += `${index + 1}. ${error}\n`;
+            });
+            if (failedServers.length > 5) {
+                report += `... dan ${failedServers.length - 5} error lainnya\n`;
+            }
+            report += `\n`;
+        }
+
+        report += `🎯 **Spesifikasi Server:**\n`;
+        report += `• RAM: Unlimited\n`;
+        report += `• CPU: Unlimited\n`;
+        report += `• Disk: Unlimited\n`;
+        report += `• IO: 1000 (Maksimal)\n`;
+        report += `• Session Folder: Auto-created\n\n`;
+        report += `🚀 **Semua server siap digunakan sebagai babu nya Tamas!**`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute confirm custom create servers error:', error);
+
+        // Create safe error message
+        let errorMessage = 'Unknown error occurred';
+        if (error && error.message) {
+            errorMessage = error.message;
+        } else if (typeof error === 'string') {
+            errorMessage = error;
+        }
+
+        // Escape the error message properly
+        const safeErrorMessage = escapeMarkdown(errorMessage);
+
+        // Send error message without markdown parsing to avoid issues
+        bot.sendMessage(chatId, `❌ Error saat membuat server: ${safeErrorMessage}`, getMainMenu());
     }
 }
 
