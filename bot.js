@@ -744,8 +744,8 @@ function getMainMenu() {
         reply_markup: {
             inline_keyboard: [
                 [
-                    { text: '🔄 Restart Semua', callback_data: 'restart_all' },
-                    { text: '🔧 Reinstall Semua', callback_data: 'reinstall_all' }
+                    { text: '🔄 Restart Server per User', callback_data: 'restart_per_user' },
+                    { text: '🔧 Reinstall Server per User', callback_data: 'reinstall_per_user' }
                 ],
                 [
                     { text: '📁 Create Session Folders (All Servers)', callback_data: 'auto_session_folder' },
@@ -1255,11 +1255,11 @@ bot.on('callback_query', async (query) => {
     bot.answerCallbackQuery(query.id);
 
     switch (data) {
-        case 'restart_all':
-            await handleMassRestart(chatId);
+        case 'restart_per_user':
+            await handleRestartPerUser(chatId);
             break;
-        case 'reinstall_all':
-            await handleMassReinstall(chatId);
+        case 'reinstall_per_user':
+            await handleReinstallPerUser(chatId);
             break;
         case 'optimize_panel':
             await handleOptimizePanel(chatId);
@@ -1472,6 +1472,26 @@ Selamat datang! Pilih aksi yang diinginkan:`;
                 const userId = parts[0];
                 const quantity = parts[1];
                 await executeConfirmCustomCreateServers(chatId, userId, quantity);
+            }
+            // Handle restart_user_ callbacks
+            else if (data.startsWith('restart_user_')) {
+                const userId = data.replace('restart_user_', '');
+                await executeRestartUserServers(chatId, userId);
+            }
+            // Handle reinstall_user_ callbacks
+            else if (data.startsWith('reinstall_user_')) {
+                const userId = data.replace('reinstall_user_', '');
+                await executeReinstallUserServers(chatId, userId);
+            }
+            // Handle confirm_restart_user_ callbacks
+            else if (data.startsWith('confirm_restart_user_')) {
+                const userId = data.replace('confirm_restart_user_', '');
+                await executeConfirmRestartUserServers(chatId, userId);
+            }
+            // Handle confirm_reinstall_user_ callbacks
+            else if (data.startsWith('confirm_reinstall_user_')) {
+                const userId = data.replace('confirm_reinstall_user_', '');
+                await executeConfirmReinstallUserServers(chatId, userId);
             }
             else {
                 bot.sendMessage(chatId, '❓ Aksi tidak dikenal.', getMainMenu());
@@ -2533,6 +2553,416 @@ async function executeConfirmCustomCreateServers(chatId, userId, quantity) {
 
         // Send error message without markdown parsing to avoid issues
         bot.sendMessage(chatId, `❌ Error saat membuat server: ${safeErrorMessage}`, getMainMenu());
+    }
+}
+
+// Handle Restart Per User
+async function handleRestartPerUser(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `🔄 *Restart Server per User*\n\n`;
+        text += `🎯 **Fitur:**\n`;
+        text += `• Restart semua server milik user spesifik\n`;
+        text += `• Tidak mempengaruhi server user lain\n`;
+        text += `• Progress tracking real-time\n\n`;
+        text += `📊 **Total User Tersedia:** ${users.length}\n\n`;
+        text += `👤 **Pilih user untuk restart semua server nya:**\n\n`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users with server count
+        const displayUsers = users.slice(0, 10);
+        for (let i = 0; i < displayUsers.length; i++) {
+            const user = displayUsers[i];
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+
+            // Get server count for this user
+            const servers = await PteroAPI.getAllServers();
+            const userServers = servers.filter(server => server.attributes.user === user.attributes.id);
+            const serverCount = userServers.length;
+
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name} (${serverCount} servers)`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `restart_user_${user.attributes.id}`
+            }]);
+        }
+
+        // Add more users button if there are more than 10
+        if (users.length > 10) {
+            keyboard.reply_markup.inline_keyboard.push([
+                { text: '👥 Lihat Semua User', callback_data: 'restart_more_users' }
+            ]);
+        }
+
+        // Add back button
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle restart per user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Handle Reinstall Per User
+async function handleReinstallPerUser(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `🔧 *Reinstall Server per User*\n\n`;
+        text += `🎯 **Fitur:**\n`;
+        text += `• Reinstall semua server milik user spesifik\n`;
+        text += `• Tidak mempengaruhi server user lain\n`;
+        text += `• Progress tracking real-time\n`;
+        text += `• ⚠️ **PERHATIAN:** Data server akan dihapus!\n\n`;
+        text += `📊 **Total User Tersedia:** ${users.length}\n\n`;
+        text += `👤 **Pilih user untuk reinstall semua server nya:**\n\n`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users with server count
+        const displayUsers = users.slice(0, 10);
+        for (let i = 0; i < displayUsers.length; i++) {
+            const user = displayUsers[i];
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+
+            // Get server count for this user
+            const servers = await PteroAPI.getAllServers();
+            const userServers = servers.filter(server => server.attributes.user === user.attributes.id);
+            const serverCount = userServers.length;
+
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name} (${serverCount} servers)`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `reinstall_user_${user.attributes.id}`
+            }]);
+        }
+
+        // Add more users button if there are more than 10
+        if (users.length > 10) {
+            keyboard.reply_markup.inline_keyboard.push([
+                { text: '👥 Lihat Semua User', callback_data: 'reinstall_more_users' }
+            ]);
+        }
+
+        // Add back button
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle reinstall per user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengambil data user: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute Restart User Servers
+async function executeRestartUserServers(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get all servers for this user
+        const allServers = await PteroAPI.getAllServers();
+        const userServers = allServers.filter(server => server.attributes.user == userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
+        }
+
+        const confirmText = `🔄 *Konfirmasi Restart Server User*\n\n` +
+                          `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                          `📧 **Email:** ${user.attributes.email}\n` +
+                          `🆔 **User ID:** ${user.attributes.id}\n\n` +
+                          `📊 **Total Server:** ${userServers.length}\n\n` +
+                          `🔄 **Aksi:** Restart semua server milik user ini\n` +
+                          `⏱️ **Estimasi waktu:** ${Math.ceil(userServers.length * 2)} detik\n\n` +
+                          `⚠️ **Catatan:**\n` +
+                          `• Server akan restart satu per satu\n` +
+                          `• Data tidak akan hilang\n` +
+                          `• Server user lain tidak terpengaruh\n\n` +
+                          `🚀 **Lanjutkan restart semua server user ini?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Restart Semua', callback_data: `confirm_restart_user_${userId}` },
+                        { text: '❌ Batal', callback_data: 'restart_per_user' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, confirmText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Execute restart user servers error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute Reinstall User Servers
+async function executeReinstallUserServers(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get all servers for this user
+        const allServers = await PteroAPI.getAllServers();
+        const userServers = allServers.filter(server => server.attributes.user == userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
+        }
+
+        const confirmText = `🔧 *Konfirmasi Reinstall Server User*\n\n` +
+                          `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                          `📧 **Email:** ${user.attributes.email}\n` +
+                          `🆔 **User ID:** ${user.attributes.id}\n\n` +
+                          `📊 **Total Server:** ${userServers.length}\n\n` +
+                          `🔧 **Aksi:** Reinstall semua server milik user ini\n` +
+                          `⏱️ **Estimasi waktu:** ${Math.ceil(userServers.length * 5)} detik\n\n` +
+                          `⚠️ **PERINGATAN PENTING:**\n` +
+                          `• **SEMUA DATA SERVER AKAN DIHAPUS!**\n` +
+                          `• File, database, konfigurasi akan hilang\n` +
+                          `• Server akan dikembalikan ke kondisi fresh install\n` +
+                          `• Server user lain tidak terpengaruh\n` +
+                          `• **AKSI INI TIDAK DAPAT DIBATALKAN!**\n\n` +
+                          `🚨 **Yakin ingin reinstall semua server user ini?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '🔧 Ya, Reinstall Semua', callback_data: `confirm_reinstall_user_${userId}` },
+                        { text: '❌ Batal', callback_data: 'reinstall_per_user' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, confirmText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Execute reinstall user servers error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute Confirm Restart User Servers
+async function executeConfirmRestartUserServers(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get all servers for this user
+        const allServers = await PteroAPI.getAllServers();
+        const userServers = allServers.filter(server => server.attributes.user == userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🔄 *Memulai Restart Server User*\n\n👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n📊 **Total Server:** ${userServers.length}\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        let successCount = 0;
+        let failedCount = 0;
+        const restartedServers = [];
+        const failedServers = [];
+
+        for (let i = 0; i < userServers.length; i++) {
+            const server = userServers[i];
+            const serverName = server.attributes.name;
+            const serverUuid = server.attributes.uuid;
+
+            try {
+                console.log(`Restarting server ${i + 1}/${userServers.length} for user ${user.attributes.email}: ${serverName}`);
+
+                const success = await PteroAPI.restartServer(serverUuid);
+                if (success) {
+                    successCount++;
+                    restartedServers.push(serverName);
+                    console.log(`✅ Successfully restarted server: ${serverName}`);
+                } else {
+                    failedCount++;
+                    failedServers.push(`${serverName}: Restart failed`);
+                    console.log(`❌ Failed to restart server: ${serverName}`);
+                }
+
+                // Add delay between restarts
+                if (i < userServers.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+
+            } catch (serverError) {
+                console.error(`❌ Failed to restart server ${serverName}:`, serverError);
+                failedCount++;
+                failedServers.push(`${serverName}: ${serverError.message}`);
+            }
+        }
+
+        // Generate final report
+        let report = `🎉 *Restart Server User Selesai*\n\n`;
+        report += `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n`;
+        report += `📧 **Email:** ${user.attributes.email}\n\n`;
+        report += `📊 **Hasil:**\n`;
+        report += `✅ Berhasil: ${successCount}\n`;
+        report += `❌ Gagal: ${failedCount}\n`;
+        report += `📈 Total: ${userServers.length}\n\n`;
+
+        if (successCount > 0) {
+            report += `🔄 **Server yang Berhasil Direstart:**\n`;
+            restartedServers.slice(0, 10).forEach((server, index) => {
+                report += `${index + 1}. ${server}\n`;
+            });
+            if (restartedServers.length > 10) {
+                report += `... dan ${restartedServers.length - 10} server lainnya\n`;
+            }
+            report += `\n`;
+        }
+
+        if (failedCount > 0) {
+            report += `❌ **Server yang Gagal:**\n`;
+            failedServers.slice(0, 5).forEach((error, index) => {
+                report += `${index + 1}. ${error}\n`;
+            });
+            if (failedServers.length > 5) {
+                report += `... dan ${failedServers.length - 5} error lainnya\n`;
+            }
+            report += `\n`;
+        }
+
+        report += `🚀 **Semua server user sudah diproses sebagai babu nya Tamas!**`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute confirm restart user servers error:', error);
+        bot.sendMessage(chatId, `❌ Error saat restart server: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Execute Confirm Reinstall User Servers
+async function executeConfirmReinstallUserServers(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get all servers for this user
+        const allServers = await PteroAPI.getAllServers();
+        const userServers = allServers.filter(server => server.attributes.user == userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🔧 *Memulai Reinstall Server User*\n\n👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n📊 **Total Server:** ${userServers.length}\n⏳ **Status:** Memproses...\n\n⚠️ **PERHATIAN:** Semua data server akan dihapus!`, { parse_mode: 'Markdown' });
+
+        let successCount = 0;
+        let failedCount = 0;
+        const reinstalledServers = [];
+        const failedServers = [];
+
+        for (let i = 0; i < userServers.length; i++) {
+            const server = userServers[i];
+            const serverName = server.attributes.name;
+            const serverUuid = server.attributes.uuid;
+
+            try {
+                console.log(`Reinstalling server ${i + 1}/${userServers.length} for user ${user.attributes.email}: ${serverName}`);
+
+                const success = await PteroAPI.reinstallServer(serverUuid);
+                if (success) {
+                    successCount++;
+                    reinstalledServers.push(serverName);
+                    console.log(`✅ Successfully reinstalled server: ${serverName}`);
+                } else {
+                    failedCount++;
+                    failedServers.push(`${serverName}: Reinstall failed`);
+                    console.log(`❌ Failed to reinstall server: ${serverName}`);
+                }
+
+                // Add longer delay between reinstalls
+                if (i < userServers.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+
+            } catch (serverError) {
+                console.error(`❌ Failed to reinstall server ${serverName}:`, serverError);
+                failedCount++;
+                failedServers.push(`${serverName}: ${serverError.message}`);
+            }
+        }
+
+        // Generate final report
+        let report = `🎉 *Reinstall Server User Selesai*\n\n`;
+        report += `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n`;
+        report += `📧 **Email:** ${user.attributes.email}\n\n`;
+        report += `📊 **Hasil:**\n`;
+        report += `✅ Berhasil: ${successCount}\n`;
+        report += `❌ Gagal: ${failedCount}\n`;
+        report += `📈 Total: ${userServers.length}\n\n`;
+
+        if (successCount > 0) {
+            report += `🔧 **Server yang Berhasil Direinstall:**\n`;
+            reinstalledServers.slice(0, 10).forEach((server, index) => {
+                report += `${index + 1}. ${server}\n`;
+            });
+            if (reinstalledServers.length > 10) {
+                report += `... dan ${reinstalledServers.length - 10} server lainnya\n`;
+            }
+            report += `\n`;
+        }
+
+        if (failedCount > 0) {
+            report += `❌ **Server yang Gagal:**\n`;
+            failedServers.slice(0, 5).forEach((error, index) => {
+                report += `${index + 1}. ${error}\n`;
+            });
+            if (failedServers.length > 5) {
+                report += `... dan ${failedServers.length - 5} error lainnya\n`;
+            }
+            report += `\n`;
+        }
+
+        report += `🚀 **Semua server user sudah diproses sebagai babu nya Tamas!**\n\n`;
+        report += `⚠️ **Catatan:** Server yang berhasil direinstall sudah dalam kondisi fresh install.`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute confirm reinstall user servers error:', error);
+        bot.sendMessage(chatId, `❌ Error saat reinstall server: ${escapeMarkdown(error.message)}`, getMainMenu());
     }
 }
 
