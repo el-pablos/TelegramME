@@ -139,6 +139,11 @@ const MAIN_PANEL_LOCATION = process.env.MAIN_PANEL_LOCATION || 1;
 const MAIN_PANEL_NEST = process.env.MAIN_PANEL_NEST || 6;
 const MAIN_PANEL_EGG = process.env.MAIN_PANEL_EGG || 19;
 
+// KONTOL IP Configuration - Force allocation to specific IP
+const KONTOL_IP = process.env.KONTOL_IP || "0.0.0.0";
+const KONTOL_ALIAS = process.env.KONTOL_ALIAS || "KONTOL";
+const FORCE_KONTOL_ALLOCATION = process.env.FORCE_KONTOL_ALLOCATION === 'true';
+
 // External Panel Configuration
 const EXTERNAL_PANEL_DOMAIN = process.env.EXTERNAL_PANEL_DOMAIN;
 const EXTERNAL_PANEL_PLTA = process.env.EXTERNAL_PANEL_PLTA;
@@ -197,6 +202,33 @@ let PANEL_BLACKLIST = [
 
 // State untuk manage blacklist
 const blacklistStates = new Map();
+
+// 🎯 Startup Log - KONTOL Allocation Configuration
+console.log('🤖 Pterodactyl Telegram Bot Started!');
+console.log('📊 Bot Features:');
+console.log('   • Server Management');
+console.log('   • User Management');
+console.log('   • File Upload & Management');
+console.log('   • Session Folder Creation');
+console.log('   • External Panel Integration');
+console.log('   • Panel Blacklist Management');
+console.log('   • Advanced Error Handling');
+console.log('');
+console.log('🔧 Configuration:');
+console.log(`   • Panel URL: ${PANEL_URL}`);
+console.log(`   • Owner ID: ${OWNER_ID}`);
+console.log(`   • External Panel: ${EXTERNAL_PANEL.domain}`);
+console.log('');
+console.log('🎯 KONTOL Allocation Configuration:');
+console.log(`   • ${KONTOL_ALIAS} IP: ${KONTOL_IP}`);
+console.log(`   • Force ${KONTOL_ALIAS} Allocation: ${FORCE_KONTOL_ALLOCATION ? '✅ ENABLED' : '❌ DISABLED'}`);
+console.log(`   • Allocation Alias: ${KONTOL_ALIAS}`);
+if (FORCE_KONTOL_ALLOCATION) {
+    console.log(`   • 🎯 All new servers will attempt to use ${KONTOL_IP} allocation`);
+    console.log(`   • 🔄 Fallback to auto-assignment if ${KONTOL_ALIAS} allocation unavailable`);
+}
+console.log('');
+console.log('✅ Bot is ready to receive commands!');
 
 // External Panel API helper
 class ExternalPteroAPI {
@@ -665,6 +697,91 @@ class PteroAPI {
         } catch (error) {
             console.error('Failed to get allocations:', error.response?.data || error.message);
             return [];
+        }
+    }
+
+    // 🎯 KONTOL IP Allocation Management
+    static async getKontolAllocation() {
+        try {
+            console.log(`🔍 Searching for ${KONTOL_ALIAS} allocation with IP: ${KONTOL_IP}`);
+
+            const allocations = await this.getAvailableAllocations();
+
+            // Find allocation with KONTOL IP
+            const kontolAllocation = allocations.find(alloc =>
+                alloc.attributes.ip === KONTOL_IP &&
+                !alloc.attributes.assigned
+            );
+
+            if (kontolAllocation) {
+                console.log(`✅ Found available ${KONTOL_ALIAS} allocation:`, {
+                    id: kontolAllocation.attributes.id,
+                    ip: kontolAllocation.attributes.ip,
+                    port: kontolAllocation.attributes.port,
+                    alias: kontolAllocation.attributes.alias || KONTOL_ALIAS
+                });
+                return kontolAllocation.attributes.id;
+            }
+
+            console.log(`❌ No available ${KONTOL_ALIAS} allocation found with IP ${KONTOL_IP}`);
+            return null;
+        } catch (error) {
+            console.error(`Failed to get ${KONTOL_ALIAS} allocation:`, error.response?.data || error.message);
+            return null;
+        }
+    }
+
+    static async createKontolAllocation(nodeId = 1) {
+        try {
+            console.log(`🚀 Creating new ${KONTOL_ALIAS} allocation with IP: ${KONTOL_IP}`);
+
+            const allocationData = {
+                ip: KONTOL_IP,
+                alias: KONTOL_ALIAS,
+                ports: ["25565"], // Default Minecraft port, adjust as needed
+                node: nodeId
+            };
+
+            const response = await this.appRequest('allocations', 'POST', allocationData);
+
+            if (response.attributes) {
+                console.log(`✅ Successfully created ${KONTOL_ALIAS} allocation:`, {
+                    id: response.attributes.id,
+                    ip: response.attributes.ip,
+                    port: response.attributes.port,
+                    alias: response.attributes.alias
+                });
+                return response.attributes.id;
+            }
+
+            return null;
+        } catch (error) {
+            console.error(`Failed to create ${KONTOL_ALIAS} allocation:`, error.response?.data || error.message);
+            return null;
+        }
+    }
+
+    static async ensureKontolAllocation(nodeId = 1) {
+        try {
+            // First try to find existing KONTOL allocation
+            let kontolAllocationId = await this.getKontolAllocation();
+
+            // If not found, try to create one
+            if (!kontolAllocationId) {
+                console.log(`🔧 No ${KONTOL_ALIAS} allocation found, attempting to create...`);
+                kontolAllocationId = await this.createKontolAllocation(nodeId);
+            }
+
+            if (kontolAllocationId) {
+                console.log(`🎯 ${KONTOL_ALIAS} allocation ready: ID ${kontolAllocationId} (${KONTOL_IP})`);
+                return kontolAllocationId;
+            }
+
+            console.log(`❌ Failed to ensure ${KONTOL_ALIAS} allocation availability`);
+            return null;
+        } catch (error) {
+            console.error(`Error ensuring ${KONTOL_ALIAS} allocation:`, error.message);
+            return null;
         }
     }
 
@@ -2417,6 +2534,18 @@ async function executeConfirmCustomCreateServers(chatId, userId, quantity) {
 
                 console.log(`Creating custom server ${i}/${serverCount} for user ${user.attributes.email}: ${serverName}`);
 
+                // 🎯 KONTOL IP Allocation - Check if KONTOL allocation should be used
+                let kontolAllocationId = null;
+
+                if (FORCE_KONTOL_ALLOCATION) {
+                    console.log(`🎯 ${KONTOL_ALIAS} mode enabled - ensuring ${KONTOL_IP} allocation...`);
+                    kontolAllocationId = await PteroAPI.ensureKontolAllocation(MAIN_PANEL_LOCATION);
+
+                    if (!kontolAllocationId) {
+                        console.log(`⚠️ ${KONTOL_ALIAS} allocation not available, falling back to auto-assignment`);
+                    }
+                }
+
                 // Custom server data with unlimited resources
                 const serverData = {
                     name: serverName,
@@ -2451,6 +2580,16 @@ async function executeConfirmCustomCreateServers(chatId, userId, quantity) {
                         port_range: []
                     }
                 };
+
+                // 🎯 Add KONTOL allocation if available
+                if (kontolAllocationId) {
+                    serverData.allocation = {
+                        default: kontolAllocationId
+                    };
+                    console.log(`🎯 Server will use ${KONTOL_ALIAS} allocation: ID ${kontolAllocationId} (${KONTOL_IP})`);
+                } else {
+                    console.log(`🔄 Server will use auto-assigned allocation`);
+                }
 
                 console.log(`📊 Server data being sent:`, JSON.stringify(serverData, null, 2));
                 const createdServer = await PteroAPI.createServer(serverData);
@@ -3112,6 +3251,18 @@ async function executeCreateServers(chatId, userId, quantity) {
             try {
                 const serverName = `Server-${user.attributes.first_name}-${i}`;
 
+                // 🎯 KONTOL IP Allocation - Check if KONTOL allocation should be used
+                let kontolAllocationId = null;
+
+                if (FORCE_KONTOL_ALLOCATION) {
+                    console.log(`🎯 ${KONTOL_ALIAS} mode enabled - ensuring ${KONTOL_IP} allocation...`);
+                    kontolAllocationId = await PteroAPI.ensureKontolAllocation(MAIN_PANEL_LOCATION);
+
+                    if (!kontolAllocationId) {
+                        console.log(`⚠️ ${KONTOL_ALIAS} allocation not available, falling back to auto-assignment`);
+                    }
+                }
+
                 // Default server configuration
                 const serverData = {
                     name: serverName,
@@ -3134,11 +3285,21 @@ async function executeCreateServers(chatId, userId, quantity) {
                         databases: 1,
                         allocations: 1,
                         backups: 1
-                    },
-                    allocation: {
-                        default: 1 // Default allocation ID (adjust as needed)
                     }
                 };
+
+                // 🎯 Add KONTOL allocation if available, otherwise use default
+                if (kontolAllocationId) {
+                    serverData.allocation = {
+                        default: kontolAllocationId
+                    };
+                    console.log(`🎯 Server will use ${KONTOL_ALIAS} allocation: ID ${kontolAllocationId} (${KONTOL_IP})`);
+                } else {
+                    serverData.allocation = {
+                        default: 1 // Default allocation ID (adjust as needed)
+                    };
+                    console.log(`🔄 Server will use default allocation: ID 1`);
+                }
 
                 console.log(`Creating server ${i}/${serverCount} for user ${user.attributes.email}: ${serverName}`);
 
