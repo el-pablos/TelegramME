@@ -39,3 +39,30 @@ temp/
 # Backup files
 *.bak
 *.backup
+bot.js.backup.*
+*.backup.*
+
+# Documentation files (except README.md)
+*.md
+!README.md
+
+# Test and debug files
+test-*.js
+debug-*.js
+*-test.js
+*-debug.js
+
+# Setup and installation files
+setup*.js
+setup*.sh
+install*.sh
+*.ps1
+
+# Output and temporary directories
+output-*/
+backup/
+backup-output/
+
+# Unused folders
+Get-WmiObject/
+test-volumes/
