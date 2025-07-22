@@ -799,9 +799,19 @@ class PteroAPI {
 
     static async updateUserPassword(userId, newPassword) {
         try {
+            // First get current user data
+            const currentUser = await this.appRequest(`users/${userId}`, 'GET');
+            const userAttributes = currentUser.attributes;
+
+            // Update with all required fields
             const userData = {
+                email: userAttributes.email,
+                username: userAttributes.username,
+                first_name: userAttributes.first_name,
+                last_name: userAttributes.last_name,
                 password: newPassword
             };
+
             const response = await this.appRequest(`users/${userId}`, 'PATCH', userData);
             return response.attributes;
         } catch (error) {
@@ -7430,7 +7440,7 @@ async function handleUploadFileToUser(chatId, userId) {
             return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
         }
 
-        const text = `📁 *Upload File to User Servers*\n\n` +
+        let text = `📁 *Upload File to User Servers*\n\n` +
                     `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
                     `📧 **Email:** ${user.attributes.email}\n` +
                     `🖥️ **Total Servers:** ${userServers.length}\n\n` +
