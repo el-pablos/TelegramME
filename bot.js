@@ -7668,10 +7668,12 @@ async function handleUploadFileToUserServers(chatId, msg) {
 
                 console.log(`📤 Uploading ${originalFileName} to ${serverName} (${serverUuid})`);
 
-                // Method 1: Try using file write API (most reliable)
+                // Method 1: Try using file write API to root directory (most reliable)
                 try {
                     const encodedFileName = encodeURIComponent(originalFileName);
                     const fileContentString = fileContent.toString('utf8');
+
+                    console.log(`📝 Writing ${originalFileName} to root directory (/home/container/) for ${serverName}`);
 
                     await PteroAPI.clientRequest(
                         `servers/${serverUuid}/files/write?file=%2F${encodedFileName}`,
@@ -7681,18 +7683,22 @@ async function handleUploadFileToUserServers(chatId, msg) {
                     );
 
                     successCount++;
-                    console.log(`✅ Method 1: File write successful for ${serverName}`);
+                    console.log(`✅ Method 1: File write to root directory successful for ${serverName}`);
+                    console.log(`🔗 File available at: ${PANEL_URL}/server/${serverUuid}/files/edit#/${originalFileName}`);
 
                 } catch (writeError) {
                     console.log(`⚠️ Method 1 failed for ${serverName}, trying method 2...`);
 
-                    // Method 2: Try using upload endpoint with proper format
+                    // Method 2: Try using upload endpoint to root directory
                     try {
+                        console.log(`📤 Uploading ${originalFileName} via form-data to root directory for ${serverName}`);
+
                         const formData = new FormData();
                         formData.append('files', fileContent, {
                             filename: originalFileName,
                             contentType: 'application/octet-stream'
                         });
+                        formData.append('directory', '/'); // Upload to root directory
 
                         await PteroAPI.clientRequest(
                             `servers/${serverUuid}/files/upload`,
@@ -7702,14 +7708,17 @@ async function handleUploadFileToUserServers(chatId, msg) {
                         );
 
                         successCount++;
-                        console.log(`✅ Method 2: Upload successful for ${serverName}`);
+                        console.log(`✅ Method 2: Upload to root directory successful for ${serverName}`);
+                        console.log(`🔗 File available at: ${PANEL_URL}/server/${serverUuid}/files/edit#/${originalFileName}`);
 
                     } catch (uploadError) {
                         console.log(`⚠️ Method 2 failed for ${serverName}, trying method 3...`);
 
-                        // Method 3: Try creating file with content
+                        // Method 3: Try creating file in root directory with content
                         try {
-                            // First create the file
+                            console.log(`📁 Creating ${originalFileName} in root directory for ${serverName}`);
+
+                            // First create the file in root directory
                             await PteroAPI.clientRequest(
                                 `servers/${serverUuid}/files/create`,
                                 'POST',
@@ -7726,7 +7735,8 @@ async function handleUploadFileToUserServers(chatId, msg) {
                             );
 
                             successCount++;
-                            console.log(`✅ Method 3: Create + write successful for ${serverName}`);
+                            console.log(`✅ Method 3: Create + write to root directory successful for ${serverName}`);
+                            console.log(`🔗 File available at: ${PANEL_URL}/server/${serverUuid}/files/edit#/${originalFileName}`);
 
                         } catch (createError) {
                             throw new Error(`All upload methods failed. Last error: ${createError.message}`);
@@ -7744,10 +7754,12 @@ async function handleUploadFileToUserServers(chatId, msg) {
             }
         }
 
-        let report = `✅ *Upload File ke Server User Selesai*\n\n` +
+        let report = `📁 *Upload File ke Root Directory Selesai*\n\n` +
                     `👤 **User:** ${state.userName}\n` +
                     `📧 **Email:** ${state.userEmail}\n` +
-                    `📄 **File:** ${escapeMarkdown(originalFileName)}\n\n` +
+                    `📄 **File:** ${escapeMarkdown(originalFileName)}\n` +
+                    `📊 **Size:** ${(fileContent.length / 1024).toFixed(2)} KB\n` +
+                    `📍 **Location:** \`/home/container/${originalFileName}\`\n\n` +
                     `📊 **Hasil:**\n` +
                     `✅ **Berhasil:** ${successCount} server\n` +
                     `❌ **Gagal:** ${failedCount} server\n` +
@@ -7763,7 +7775,27 @@ async function handleUploadFileToUserServers(chatId, msg) {
             }
         }
 
-        report += `\n🎯 **File berhasil diupload ke ${successCount} server!**`;
+        if (successCount > 0) {
+            report += `\n🎉 **File berhasil diupload ke root directory ${successCount} server!**\n\n`;
+            report += `🔗 **Access Files:**\n`;
+
+            // Show first 3 successful servers with direct links
+            const successfulServers = state.servers.filter(server =>
+                !failedServers.includes(server.attributes.name)
+            ).slice(0, 3);
+
+            successfulServers.forEach(server => {
+                const serverUuid = server.attributes.uuid;
+                const serverName = server.attributes.name;
+                report += `• [${serverName}](${PANEL_URL}/server/${serverUuid}/files/edit#/${originalFileName})\n`;
+            });
+
+            if (successCount > 3) {
+                report += `• ... dan ${successCount - 3} server lainnya\n`;
+            }
+
+            report += `\n💡 **Info:** File tersimpan di root directory, berbeda dengan setor creds yang masuk ke /session`;
+        }
 
         // Clear state
         uploadFileUserStates.delete(chatId);
