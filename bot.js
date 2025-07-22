@@ -515,7 +515,8 @@ class PteroAPI {
                     'Authorization': `Bearer ${APP_API_KEY}`,
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
-                }
+                },
+                timeout: 30000 // 30 second timeout
             };
 
             if (data) config.data = data;
@@ -524,6 +525,21 @@ class PteroAPI {
             return response.data;
         } catch (error) {
             console.error('Application API Error:', error.response?.data || error.message);
+
+            // Provide more specific error messages
+            if (error.response) {
+                if (error.response.status === 404) {
+                    throw new Error(`Resource not found: ${endpoint}`);
+                } else if (error.response.status === 422) {
+                    const validationErrors = error.response.data.errors?.map(err => err.detail).join(', ') || 'Validation failed';
+                    throw new Error(`Validation Error: ${validationErrors}`);
+                } else if (error.response.status === 403) {
+                    throw new Error('Access denied: Insufficient permissions');
+                }
+            } else if (error.code === 'ECONNABORTED') {
+                throw new Error('Request timeout: Server took too long to respond');
+            }
+
             throw error;
         }
     }
