@@ -11,6 +11,37 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const FormData = require('form-data');
+const dns = require('dns');
+const https = require('https');
+const http = require('http');
+
+// Configure DNS to use Google DNS for better connectivity
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1']);
+
+// Create HTTP agents with better connection handling
+const httpsAgent = new https.Agent({
+    keepAlive: true,
+    keepAliveMsecs: 30000,
+    maxSockets: 50,
+    maxFreeSockets: 10,
+    timeout: 30000,
+    family: 4 // Force IPv4 to avoid IPv6 issues
+});
+
+const httpAgent = new http.Agent({
+    keepAlive: true,
+    keepAliveMsecs: 30000,
+    maxSockets: 50,
+    maxFreeSockets: 10,
+    timeout: 30000,
+    family: 4 // Force IPv4 to avoid IPv6 issues
+});
+
+// Configure axios defaults
+axios.defaults.httpsAgent = httpsAgent;
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.timeout = 30000;
 
 // Import Rose Bot modules
 const AdminModule = require('./modules/admin');
@@ -7527,10 +7558,104 @@ async function handleUploadFileToUserServers(chatId, msg) {
 
         bot.sendMessage(chatId, `📁 *Mengupload File ke Server User*\n\n👤 **User:** ${state.userName}\n📄 **File:** ${escapeMarkdown(originalFileName)}\n📊 **Target:** ${state.servers.length} server\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
 
-        // Download file from Telegram
-        const fileLink = await bot.getFileLink(document.file_id);
-        const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
-        const fileContent = Buffer.from(response.data);
+        // Download file from Telegram with retry mechanism
+        let fileContent;
+        let downloadSuccess = false;
+        const maxRetries = 3;
+
+        for (let attempt = 1; attempt <= maxRetries && !downloadSuccess; attempt++) {
+            try {
+                console.log(`📥 Download attempt ${attempt}/${maxRetries} for: ${originalFileName}`);
+
+                const fileLink = await bot.getFileLink(document.file_id);
+                console.log(`🔗 File link obtained: ${fileLink.replace(/bot\d+:[^/]+/, 'bot***:***')}`);
+
+                const response = await axios.get(fileLink, {
+                    responseType: 'arraybuffer',
+                    timeout: 30000, // 30 second timeout
+                    maxRedirects: 5,
+                    httpsAgent: httpsAgent,
+                    httpAgent: httpAgent,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (compatible; TelegramBot/1.0)',
+                        'Accept': '*/*',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Connection': 'keep-alive'
+                    },
+                    validateStatus: function (status) {
+                        return status >= 200 && status < 300;
+                    }
+                });
+
+                fileContent = Buffer.from(response.data);
+                downloadSuccess = true;
+                console.log(`✅ File downloaded successfully: ${fileContent.length} bytes`);
+
+            } catch (downloadError) {
+                console.error(`❌ Download attempt ${attempt} failed:`, downloadError.message);
+
+                if (attempt < maxRetries) {
+                    console.log(`🔄 Retrying in 2 seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } else {
+                    // Try alternative download method using bot.downloadFile
+                    try {
+                        console.log(`🔄 Trying alternative download method...`);
+
+                        // Create temp directory if it doesn't exist
+                        const tempDir = path.join(__dirname, 'temp');
+                        if (!fs.existsSync(tempDir)) {
+                            fs.mkdirSync(tempDir, { recursive: true });
+                        }
+
+                        const filePath = await bot.downloadFile(document.file_id, tempDir);
+                        fileContent = fs.readFileSync(filePath);
+                        downloadSuccess = true;
+                        console.log(`✅ Alternative download successful: ${fileContent.length} bytes`);
+
+                        // Clean up temp file
+                        try {
+                            fs.unlinkSync(filePath);
+                        } catch (cleanupError) {
+                            console.log(`⚠️ Could not clean up temp file: ${cleanupError.message}`);
+                        }
+
+                    } catch (altError) {
+                        // Final fallback: try using curl command
+                        try {
+                            console.log(`🔄 Trying curl fallback method...`);
+                            const { exec } = require('child_process');
+                            const util = require('util');
+                            const execPromise = util.promisify(exec);
+
+                            const tempDir = path.join(__dirname, 'temp');
+                            if (!fs.existsSync(tempDir)) {
+                                fs.mkdirSync(tempDir, { recursive: true });
+                            }
+
+                            const tempFile = path.join(tempDir, `temp_${Date.now()}_${originalFileName}`);
+                            const curlCommand = `curl -L --max-time 30 --retry 3 --retry-delay 2 -o "${tempFile}" "${fileLink}"`;
+
+                            await execPromise(curlCommand);
+
+                            if (fs.existsSync(tempFile)) {
+                                fileContent = fs.readFileSync(tempFile);
+                                downloadSuccess = true;
+                                console.log(`✅ Curl fallback successful: ${fileContent.length} bytes`);
+
+                                // Clean up temp file
+                                fs.unlinkSync(tempFile);
+                            } else {
+                                throw new Error('Curl download failed - file not created');
+                            }
+
+                        } catch (curlError) {
+                            throw new Error(`All download methods failed. Axios: ${downloadError.message}, Bot: ${altError.message}, Curl: ${curlError.message}`);
+                        }
+                    }
+                }
+            }
+        }
 
         let successCount = 0;
         let failedCount = 0;
@@ -7541,24 +7666,81 @@ async function handleUploadFileToUserServers(chatId, msg) {
                 const serverUuid = server.attributes.uuid;
                 const serverName = server.attributes.name;
 
-                // Upload file via Pterodactyl API
-                const uploadData = {
-                    files: [{
-                        name: originalFileName,
-                        content: fileContent.toString('base64')
-                    }]
-                };
+                console.log(`📤 Uploading ${originalFileName} to ${serverName} (${serverUuid})`);
 
-                await PteroAPI.clientRequest(`servers/${serverUuid}/files/upload`, 'POST', uploadData);
-                successCount++;
-                console.log(`✅ Uploaded ${originalFileName} to ${serverName}`);
+                // Method 1: Try using file write API (most reliable)
+                try {
+                    const encodedFileName = encodeURIComponent(originalFileName);
+                    const fileContentString = fileContent.toString('utf8');
+
+                    await PteroAPI.clientRequest(
+                        `servers/${serverUuid}/files/write?file=%2F${encodedFileName}`,
+                        'POST',
+                        fileContentString,
+                        { 'Content-Type': 'text/plain' }
+                    );
+
+                    successCount++;
+                    console.log(`✅ Method 1: File write successful for ${serverName}`);
+
+                } catch (writeError) {
+                    console.log(`⚠️ Method 1 failed for ${serverName}, trying method 2...`);
+
+                    // Method 2: Try using upload endpoint with proper format
+                    try {
+                        const formData = new FormData();
+                        formData.append('files', fileContent, {
+                            filename: originalFileName,
+                            contentType: 'application/octet-stream'
+                        });
+
+                        await PteroAPI.clientRequest(
+                            `servers/${serverUuid}/files/upload`,
+                            'POST',
+                            formData,
+                            formData.getHeaders()
+                        );
+
+                        successCount++;
+                        console.log(`✅ Method 2: Upload successful for ${serverName}`);
+
+                    } catch (uploadError) {
+                        console.log(`⚠️ Method 2 failed for ${serverName}, trying method 3...`);
+
+                        // Method 3: Try creating file with content
+                        try {
+                            // First create the file
+                            await PteroAPI.clientRequest(
+                                `servers/${serverUuid}/files/create`,
+                                'POST',
+                                { name: originalFileName, directory: '/' }
+                            );
+
+                            // Then write content to it
+                            const encodedFileName = encodeURIComponent(originalFileName);
+                            await PteroAPI.clientRequest(
+                                `servers/${serverUuid}/files/write?file=%2F${encodedFileName}`,
+                                'POST',
+                                fileContent.toString('utf8'),
+                                { 'Content-Type': 'text/plain' }
+                            );
+
+                            successCount++;
+                            console.log(`✅ Method 3: Create + write successful for ${serverName}`);
+
+                        } catch (createError) {
+                            throw new Error(`All upload methods failed. Last error: ${createError.message}`);
+                        }
+                    }
+                }
 
                 // Small delay to prevent API rate limiting
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
             } catch (error) {
                 failedCount++;
                 failedServers.push(server.attributes.name);
-                console.error(`❌ Failed to upload to ${server.attributes.name}:`, error);
+                console.error(`❌ Failed to upload to ${server.attributes.name}:`, error.message);
             }
         }
 
@@ -7603,7 +7785,6 @@ bot.on('polling_error', (error) => {
 // Handle document uploads
 bot.on('document', async (msg) => {
     const chatId = msg.chat.id;
-    const document = msg.document;
 
     // Check if user is in setor creds mode
     if (setorCredsState.has(chatId)) {
@@ -7617,8 +7798,9 @@ bot.on('document', async (msg) => {
         return;
     }
 
-    // If not in any upload mode, ignore document
-    bot.sendMessage(chatId, '📄 *File diterima*\n\nUntuk upload file, gunakan menu yang sesuai terlebih dahulu:\n• "📤 Setor Creds" untuk upload JSON\n• "📁 Upload File to User Servers" untuk upload ke server user', {
+    // If not in any upload mode, provide guidance
+    const fileName = msg.document?.file_name || 'unknown file';
+    bot.sendMessage(chatId, `📄 *File "${escapeMarkdown(fileName)}" diterima*\n\nUntuk upload file, gunakan menu yang sesuai terlebih dahulu:\n• "📤 Setor Creds" untuk upload JSON\n• "📁 Upload File to User Servers" untuk upload ke server user`, {
         parse_mode: 'Markdown',
         ...getMainMenu()
     });
