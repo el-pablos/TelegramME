@@ -203,6 +203,9 @@ let PANEL_BLACKLIST = [
 // State untuk manage blacklist
 const blacklistStates = new Map();
 
+// State untuk upload file to user servers
+const uploadFileUserStates = new Map();
+
 // 🎯 Startup Log - KONTOL Allocation Configuration
 console.log('🤖 Pterodactyl Telegram Bot Started!');
 console.log('📊 Bot Features:');
@@ -700,30 +703,44 @@ class PteroAPI {
         }
     }
 
-    // 🎯 KONTOL IP Allocation Management
+    // 🎯 KONTOL IP Allocation Management - FIXED VERSION
     static async getKontolAllocation() {
         try {
             console.log(`🔍 Searching for ${KONTOL_ALIAS} allocation with IP: ${KONTOL_IP}`);
 
             const allocations = await this.getAvailableAllocations();
 
-            // Find allocation with KONTOL IP
-            const kontolAllocation = allocations.find(alloc =>
-                alloc.attributes.ip === KONTOL_IP &&
-                !alloc.attributes.assigned
+            // Find allocation with KONTOL IP (both assigned and unassigned)
+            const kontolAllocations = allocations.filter(alloc =>
+                alloc.attributes.ip === KONTOL_IP
             );
 
-            if (kontolAllocation) {
-                console.log(`✅ Found available ${KONTOL_ALIAS} allocation:`, {
-                    id: kontolAllocation.attributes.id,
-                    ip: kontolAllocation.attributes.ip,
-                    port: kontolAllocation.attributes.port,
-                    alias: kontolAllocation.attributes.alias || KONTOL_ALIAS
-                });
-                return kontolAllocation.attributes.id;
+            if (kontolAllocations.length > 0) {
+                // Prefer unassigned allocation first
+                const unassignedAllocation = kontolAllocations.find(alloc => !alloc.attributes.assigned);
+
+                if (unassignedAllocation) {
+                    console.log(`✅ Found available ${KONTOL_ALIAS} allocation:`, {
+                        id: unassignedAllocation.attributes.id,
+                        ip: unassignedAllocation.attributes.ip,
+                        port: unassignedAllocation.attributes.port,
+                        assigned: unassignedAllocation.attributes.assigned
+                    });
+                    return unassignedAllocation.attributes.id;
+                } else {
+                    // Use any allocation with KONTOL IP (even if assigned)
+                    const anyAllocation = kontolAllocations[0];
+                    console.log(`⚠️ Using assigned ${KONTOL_ALIAS} allocation (no unassigned available):`, {
+                        id: anyAllocation.attributes.id,
+                        ip: anyAllocation.attributes.ip,
+                        port: anyAllocation.attributes.port,
+                        assigned: anyAllocation.attributes.assigned
+                    });
+                    return anyAllocation.attributes.id;
+                }
             }
 
-            console.log(`❌ No available ${KONTOL_ALIAS} allocation found with IP ${KONTOL_IP}`);
+            console.log(`❌ No ${KONTOL_ALIAS} allocation found with IP ${KONTOL_IP}`);
             return null;
         } catch (error) {
             console.error(`Failed to get ${KONTOL_ALIAS} allocation:`, error.response?.data || error.message);
@@ -731,53 +748,18 @@ class PteroAPI {
         }
     }
 
-    static async createKontolAllocation(nodeId = 1) {
-        try {
-            console.log(`🚀 Creating new ${KONTOL_ALIAS} allocation with IP: ${KONTOL_IP}`);
-
-            const allocationData = {
-                ip: KONTOL_IP,
-                alias: KONTOL_ALIAS,
-                ports: ["25565"], // Default Minecraft port, adjust as needed
-                node: nodeId
-            };
-
-            const response = await this.appRequest('allocations', 'POST', allocationData);
-
-            if (response.attributes) {
-                console.log(`✅ Successfully created ${KONTOL_ALIAS} allocation:`, {
-                    id: response.attributes.id,
-                    ip: response.attributes.ip,
-                    port: response.attributes.port,
-                    alias: response.attributes.alias
-                });
-                return response.attributes.id;
-            }
-
-            return null;
-        } catch (error) {
-            console.error(`Failed to create ${KONTOL_ALIAS} allocation:`, error.response?.data || error.message);
-            return null;
-        }
-    }
-
     static async ensureKontolAllocation(nodeId = 1) {
         try {
-            // First try to find existing KONTOL allocation
+            // Only try to find existing KONTOL allocation, don't create new ones
             let kontolAllocationId = await this.getKontolAllocation();
-
-            // If not found, try to create one
-            if (!kontolAllocationId) {
-                console.log(`🔧 No ${KONTOL_ALIAS} allocation found, attempting to create...`);
-                kontolAllocationId = await this.createKontolAllocation(nodeId);
-            }
 
             if (kontolAllocationId) {
                 console.log(`🎯 ${KONTOL_ALIAS} allocation ready: ID ${kontolAllocationId} (${KONTOL_IP})`);
                 return kontolAllocationId;
             }
 
-            console.log(`❌ Failed to ensure ${KONTOL_ALIAS} allocation availability`);
+            console.log(`❌ No ${KONTOL_ALIAS} allocation available with IP ${KONTOL_IP}`);
+            console.log(`💡 Please create allocation manually in Pterodactyl panel with IP ${KONTOL_IP}`);
             return null;
         } catch (error) {
             console.error(`Error ensuring ${KONTOL_ALIAS} allocation:`, error.message);
@@ -801,6 +783,49 @@ class PteroAPI {
             return response.attributes;
         } catch (error) {
             console.error('Failed to create user:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    static async deleteUser(userId) {
+        try {
+            await this.appRequest(`users/${userId}`, 'DELETE');
+            return true;
+        } catch (error) {
+            console.error('Failed to delete user:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    static async updateUserPassword(userId, newPassword) {
+        try {
+            const userData = {
+                password: newPassword
+            };
+            const response = await this.appRequest(`users/${userId}`, 'PATCH', userData);
+            return response.attributes;
+        } catch (error) {
+            console.error('Failed to update user password:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    static async getUserServers(userId) {
+        try {
+            const servers = await this.getAllServers();
+            return servers.filter(server => server.attributes.user === parseInt(userId));
+        } catch (error) {
+            console.error('Failed to get user servers:', error.response?.data || error.message);
+            return [];
+        }
+    }
+
+    static async deleteServer(serverId) {
+        try {
+            await this.appRequest(`servers/${serverId}`, 'DELETE');
+            return true;
+        } catch (error) {
+            console.error('Failed to delete server:', error.response?.data || error.message);
             throw error;
         }
     }
@@ -883,6 +908,10 @@ function getMainMenu() {
                 ],
                 [
                     { text: '🆕 Create Server untuk User', callback_data: 'create_user_server' }
+                ],
+                [
+                    { text: '👤 User Management', callback_data: 'user_management' },
+                    { text: '📁 File Management', callback_data: 'file_management' }
                 ]
             ]
         }
@@ -1457,6 +1486,12 @@ Selamat datang! Pilih aksi yang diinginkan:`;
         case 'more_users':
             await handleMoreUsers(chatId);
             break;
+        case 'user_management':
+            await handleUserManagement(chatId);
+            break;
+        case 'file_management':
+            await handleFileManagement(chatId);
+            break;
         case 'manage_blacklist':
             await handleManageBlacklist(chatId);
             break;
@@ -1609,6 +1644,50 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             else if (data.startsWith('confirm_reinstall_user_')) {
                 const userId = data.replace('confirm_reinstall_user_', '');
                 await executeConfirmReinstallUserServers(chatId, userId);
+            }
+            // Handle delete user callbacks
+            else if (data === 'delete_user_select') {
+                await handleDeleteUserSelect(chatId);
+            }
+            else if (data.startsWith('delete_user_')) {
+                const userId = data.replace('delete_user_', '');
+                await handleDeleteUserConfirm(chatId, userId);
+            }
+            else if (data.startsWith('confirm_delete_user_')) {
+                const userId = data.replace('confirm_delete_user_', '');
+                await executeDeleteUser(chatId, userId);
+            }
+            // Handle change password callbacks
+            else if (data === 'change_password_select') {
+                await handleChangePasswordSelect(chatId);
+            }
+            else if (data.startsWith('change_password_')) {
+                const userId = data.replace('change_password_', '');
+                await handleChangePasswordUser(chatId, userId);
+            }
+            // Handle delete user servers callbacks
+            else if (data === 'delete_user_servers_select') {
+                await handleDeleteUserServersSelect(chatId);
+            }
+            else if (data.startsWith('delete_servers_')) {
+                const userId = data.replace('delete_servers_', '');
+                await handleDeleteUserServersConfirm(chatId, userId);
+            }
+            else if (data.startsWith('confirm_delete_servers_')) {
+                const userId = data.replace('confirm_delete_servers_', '');
+                await executeDeleteUserServers(chatId, userId);
+            }
+            // Handle upload file to user servers callbacks
+            else if (data === 'upload_file_user_select') {
+                await handleUploadFileUserSelect(chatId);
+            }
+            else if (data.startsWith('upload_file_')) {
+                const userId = data.replace('upload_file_', '');
+                await handleUploadFileToUser(chatId, userId);
+            }
+            else if (data === 'upload_file_user_cancel') {
+                uploadFileUserStates.delete(chatId);
+                bot.sendMessage(chatId, '❌ Upload file dibatalkan.', getMainMenu());
             }
             else {
                 bot.sendMessage(chatId, '❓ Aksi tidak dikenal.', getMainMenu());
@@ -6874,6 +6953,622 @@ async function executeCopyExternalCreds(chatId) {
     }
 }
 
+// 👤 USER MANAGEMENT FUNCTIONS
+async function handleUserManagement(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `👤 *User Management*\n\n`;
+        text += `📊 **Total Users:** ${users.length}\n`;
+        text += `👑 **Admins:** ${users.filter(u => u.attributes.root_admin).length}\n`;
+        text += `👥 **Regular Users:** ${users.filter(u => !u.attributes.root_admin).length}\n\n`;
+        text += `🔧 **Pilih aksi yang diinginkan:**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '🗑️ Delete User', callback_data: 'delete_user_select' },
+                        { text: '🔑 Change Password', callback_data: 'change_password_select' }
+                    ],
+                    [
+                        { text: '🗂️ Delete All User Servers', callback_data: 'delete_user_servers_select' },
+                        { text: '📁 Upload File to User Servers', callback_data: 'upload_file_user_select' }
+                    ],
+                    [
+                        { text: '📋 List All Users', callback_data: 'list_all_users' },
+                        { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle user management error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function handleFileManagement(chatId) {
+    try {
+        const text = `📁 *File Management*\n\n` +
+                    `🔧 **Pilih aksi yang diinginkan:**\n\n` +
+                    `📤 **Upload File:** Upload file ke semua server user tertentu\n` +
+                    `🗂️ **Manage Files:** Kelola file di server user\n` +
+                    `📋 **File Status:** Cek status file di server`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '📤 Upload File to User Servers', callback_data: 'upload_file_user_select' },
+                        { text: '📋 Check File Status', callback_data: 'check_file_status' }
+                    ],
+                    [
+                        { text: '🗂️ Manage User Files', callback_data: 'manage_user_files' },
+                        { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle file management error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// 🗑️ DELETE USER FUNCTIONS
+async function handleDeleteUserSelect(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `🗑️ *Delete User*\n\n`;
+        text += `⚠️ **PERINGATAN:** Menghapus user akan menghapus semua data user!\n\n`;
+        text += `📊 **Total Users:** ${users.length}\n\n`;
+        text += `👤 **Pilih user yang akan dihapus:**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users
+        const displayUsers = users.slice(0, 10);
+        for (const user of displayUsers) {
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name}`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `delete_user_${user.attributes.id}`
+            }]);
+        }
+
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🔙 Back to User Management', callback_data: 'user_management' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle delete user select error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function handleDeleteUserConfirm(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get user servers
+        const userServers = await PteroAPI.getUserServers(userId);
+
+        const text = `🗑️ *Konfirmasi Delete User*\n\n` +
+                    `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                    `📧 **Email:** ${user.attributes.email}\n` +
+                    `🆔 **ID:** ${user.attributes.id}\n` +
+                    `👑 **Admin:** ${user.attributes.root_admin ? 'Ya' : 'Tidak'}\n` +
+                    `🖥️ **Total Servers:** ${userServers.length}\n\n` +
+                    `⚠️ **PERINGATAN:**\n` +
+                    `• User akan dihapus permanen\n` +
+                    `• Semua server milik user akan dihapus\n` +
+                    `• Data tidak dapat dikembalikan\n\n` +
+                    `🚨 **Yakin ingin menghapus user ini?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Hapus User', callback_data: `confirm_delete_user_${userId}` },
+                        { text: '❌ Batal', callback_data: 'delete_user_select' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle delete user confirm error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function executeDeleteUser(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🗑️ *Menghapus User*\n\n👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        // First delete all user servers
+        const userServers = await PteroAPI.getUserServers(userId);
+        let deletedServers = 0;
+        let failedServers = 0;
+
+        for (const server of userServers) {
+            try {
+                await PteroAPI.deleteServer(server.attributes.id);
+                deletedServers++;
+                console.log(`✅ Deleted server: ${server.attributes.name}`);
+            } catch (error) {
+                failedServers++;
+                console.error(`❌ Failed to delete server ${server.attributes.name}:`, error);
+            }
+        }
+
+        // Then delete the user
+        await PteroAPI.deleteUser(userId);
+
+        const report = `✅ *User Berhasil Dihapus*\n\n` +
+                      `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                      `📧 **Email:** ${user.attributes.email}\n` +
+                      `🆔 **ID:** ${user.attributes.id}\n\n` +
+                      `📊 **Servers Dihapus:** ${deletedServers}\n` +
+                      `❌ **Servers Gagal:** ${failedServers}\n\n` +
+                      `✅ **User dan semua data telah dihapus permanen**`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute delete user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menghapus user: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// 🔑 CHANGE PASSWORD FUNCTIONS
+async function handleChangePasswordSelect(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `🔑 *Change User Password*\n\n`;
+        text += `📊 **Total Users:** ${users.length}\n\n`;
+        text += `👤 **Pilih user untuk ganti password:**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users
+        const displayUsers = users.slice(0, 10);
+        for (const user of displayUsers) {
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name}`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `change_password_${user.attributes.id}`
+            }]);
+        }
+
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🔙 Back to User Management', callback_data: 'user_management' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle change password select error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function handleChangePasswordUser(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Generate random password
+        const newPassword = Math.random().toString(36).slice(-12) + Math.random().toString(36).slice(-12).toUpperCase() + '123!';
+
+        bot.sendMessage(chatId, `🔑 *Mengubah Password User*\n\n👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        // Update password
+        await PteroAPI.updateUserPassword(userId, newPassword);
+
+        const report = `✅ *Password Berhasil Diubah*\n\n` +
+                      `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                      `📧 **Email:** ${user.attributes.email}\n` +
+                      `🆔 **ID:** ${user.attributes.id}\n\n` +
+                      `🔑 **Password Baru:** \`${newPassword}\`\n\n` +
+                      `⚠️ **Pastikan untuk menyimpan password dengan aman!**`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle change password user error:', error);
+        bot.sendMessage(chatId, `❌ Error saat mengubah password: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// 🗂️ DELETE ALL USER SERVERS FUNCTIONS
+async function handleDeleteUserServersSelect(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `🗂️ *Delete All User Servers*\n\n`;
+        text += `⚠️ **PERINGATAN:** Menghapus semua server milik user!\n\n`;
+        text += `📊 **Total Users:** ${users.length}\n\n`;
+        text += `👤 **Pilih user untuk hapus semua servernya:**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users
+        const displayUsers = users.slice(0, 10);
+        for (const user of displayUsers) {
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name}`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `delete_servers_${user.attributes.id}`
+            }]);
+        }
+
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🔙 Back to User Management', callback_data: 'user_management' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle delete user servers select error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function handleDeleteUserServersConfirm(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get user servers
+        const userServers = await PteroAPI.getUserServers(userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
+        }
+
+        const text = `🗂️ *Konfirmasi Delete All User Servers*\n\n` +
+                    `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                    `📧 **Email:** ${user.attributes.email}\n` +
+                    `🆔 **ID:** ${user.attributes.id}\n` +
+                    `🖥️ **Total Servers:** ${userServers.length}\n\n` +
+                    `📋 **Server List:**\n`;
+
+        // Show first 5 servers
+        for (let i = 0; i < Math.min(5, userServers.length); i++) {
+            text += `• ${userServers[i].attributes.name}\n`;
+        }
+        if (userServers.length > 5) {
+            text += `• ... dan ${userServers.length - 5} server lainnya\n`;
+        }
+
+        text += `\n⚠️ **PERINGATAN:**\n` +
+               `• Semua ${userServers.length} server akan dihapus permanen\n` +
+               `• Data server tidak dapat dikembalikan\n` +
+               `• User tetap ada, hanya servernya yang dihapus\n\n` +
+               `🚨 **Yakin ingin menghapus semua server user ini?**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Ya, Hapus Semua Server', callback_data: `confirm_delete_servers_${userId}` },
+                        { text: '❌ Batal', callback_data: 'delete_user_servers_select' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle delete user servers confirm error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function executeDeleteUserServers(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        const userServers = await PteroAPI.getUserServers(userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User tidak memiliki server!`, getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `🗂️ *Menghapus Semua Server User*\n\n👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n📊 **Total:** ${userServers.length} server\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        let deletedCount = 0;
+        let failedCount = 0;
+        const failedServers = [];
+
+        for (const server of userServers) {
+            try {
+                await PteroAPI.deleteServer(server.attributes.id);
+                deletedCount++;
+                console.log(`✅ Deleted server: ${server.attributes.name}`);
+
+                // Small delay to prevent API rate limiting
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (error) {
+                failedCount++;
+                failedServers.push(server.attributes.name);
+                console.error(`❌ Failed to delete server ${server.attributes.name}:`, error);
+            }
+        }
+
+        let report = `✅ *Penghapusan Server User Selesai*\n\n` +
+                    `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                    `📧 **Email:** ${user.attributes.email}\n\n` +
+                    `📊 **Hasil:**\n` +
+                    `✅ **Berhasil:** ${deletedCount} server\n` +
+                    `❌ **Gagal:** ${failedCount} server\n` +
+                    `📈 **Total:** ${userServers.length} server\n\n`;
+
+        if (failedServers.length > 0) {
+            report += `❌ **Server Gagal Dihapus:**\n`;
+            for (const serverName of failedServers.slice(0, 5)) {
+                report += `• ${serverName}\n`;
+            }
+            if (failedServers.length > 5) {
+                report += `• ... dan ${failedServers.length - 5} server lainnya\n`;
+            }
+        }
+
+        report += `\n✅ **Proses selesai!**`;
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Execute delete user servers error:', error);
+        bot.sendMessage(chatId, `❌ Error saat menghapus server: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// 📁 UPLOAD FILE TO USER SERVERS FUNCTIONS
+async function handleUploadFileUserSelect(chatId) {
+    try {
+        const users = await PteroAPI.getUsers();
+
+        let text = `📁 *Upload File to User Servers*\n\n`;
+        text += `📤 **Upload file ke semua server milik user tertentu**\n\n`;
+        text += `📊 **Total Users:** ${users.length}\n\n`;
+        text += `👤 **Pilih user target:**`;
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: []
+            }
+        };
+
+        // Show first 10 users
+        const displayUsers = users.slice(0, 10);
+        for (const user of displayUsers) {
+            const adminBadge = user.attributes.root_admin ? '👑' : '👤';
+            const userText = `${adminBadge} ${user.attributes.first_name} ${user.attributes.last_name}`;
+
+            keyboard.reply_markup.inline_keyboard.push([{
+                text: userText,
+                callback_data: `upload_file_${user.attributes.id}`
+            }]);
+        }
+
+        keyboard.reply_markup.inline_keyboard.push([
+            { text: '🔙 Back to User Management', callback_data: 'user_management' }
+        ]);
+
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle upload file user select error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function handleUploadFileToUser(chatId, userId) {
+    try {
+        const users = await PteroAPI.getUsers();
+        const user = users.find(u => u.attributes.id == userId);
+
+        if (!user) {
+            return bot.sendMessage(chatId, '❌ User tidak ditemukan!', getMainMenu());
+        }
+
+        // Get user servers
+        const userServers = await PteroAPI.getUserServers(userId);
+
+        if (userServers.length === 0) {
+            return bot.sendMessage(chatId, `❌ User ${user.attributes.first_name} ${user.attributes.last_name} tidak memiliki server!`, getMainMenu());
+        }
+
+        const text = `📁 *Upload File to User Servers*\n\n` +
+                    `👤 **User:** ${user.attributes.first_name} ${user.attributes.last_name}\n` +
+                    `📧 **Email:** ${user.attributes.email}\n` +
+                    `🖥️ **Total Servers:** ${userServers.length}\n\n` +
+                    `📋 **Server List:**\n`;
+
+        // Show first 5 servers
+        for (let i = 0; i < Math.min(5, userServers.length); i++) {
+            text += `• ${userServers[i].attributes.name}\n`;
+        }
+        if (userServers.length > 5) {
+            text += `• ... dan ${userServers.length - 5} server lainnya\n`;
+        }
+
+        const finalText = text + `\n📤 **Kirim file yang ingin diupload ke semua server user ini**\n\n` +
+                         `📝 **Supported formats:** .json, .txt, .js, .py, .sh, .yml, .yaml, .env\n` +
+                         `📏 **Max size:** 20MB\n\n` +
+                         `⚠️ **File akan diupload ke folder root semua server**`;
+
+        // Set state for file upload
+        uploadFileUserStates.set(chatId, {
+            userId: userId,
+            userName: `${user.attributes.first_name} ${user.attributes.last_name}`,
+            userEmail: user.attributes.email,
+            servers: userServers,
+            startTime: new Date()
+        });
+
+        const keyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '❌ Batal', callback_data: 'upload_file_user_cancel' }
+                    ]
+                ]
+            }
+        };
+
+        bot.sendMessage(chatId, finalText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+        console.error('Handle upload file to user error:', error);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+async function handleUploadFileToUserServers(chatId, msg) {
+    try {
+        const document = msg.document;
+        const state = uploadFileUserStates.get(chatId);
+
+        if (!state) {
+            return bot.sendMessage(chatId, '❌ Session upload file tidak ditemukan. Mulai ulang dari menu.', getMainMenu());
+        }
+
+        // Check file extension
+        const originalFileName = document.file_name || 'unknown.file';
+        const fileExt = path.extname(originalFileName).toLowerCase();
+        const allowedExtensions = ['.json', '.txt', '.js', '.py', '.sh', '.yml', '.yaml', '.env', '.conf', '.cfg'];
+
+        if (!allowedExtensions.includes(fileExt)) {
+            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${escapeMarkdown(originalFileName)}\nAlasan: Format file tidak didukung\n\nFormat yang didukung: ${allowedExtensions.join(', ')}`, { parse_mode: 'Markdown' });
+        }
+
+        // Check file size (max 20MB)
+        const maxFileSize = 20 * 1024 * 1024; // 20MB
+        if (document.file_size > maxFileSize) {
+            return bot.sendMessage(chatId, `❌ *File Terlalu Besar*\n\nFile: ${escapeMarkdown(originalFileName)}\nUkuran: ${(document.file_size / 1024 / 1024).toFixed(1)} MB\nMaksimal: 20 MB`, { parse_mode: 'Markdown' });
+        }
+
+        bot.sendMessage(chatId, `📁 *Mengupload File ke Server User*\n\n👤 **User:** ${state.userName}\n📄 **File:** ${escapeMarkdown(originalFileName)}\n📊 **Target:** ${state.servers.length} server\n⏳ **Status:** Memproses...`, { parse_mode: 'Markdown' });
+
+        // Download file from Telegram
+        const fileLink = await bot.getFileLink(document.file_id);
+        const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
+        const fileContent = Buffer.from(response.data);
+
+        let successCount = 0;
+        let failedCount = 0;
+        const failedServers = [];
+
+        for (const server of state.servers) {
+            try {
+                const serverUuid = server.attributes.uuid;
+                const serverName = server.attributes.name;
+
+                // Upload file via Pterodactyl API
+                const uploadData = {
+                    files: [{
+                        name: originalFileName,
+                        content: fileContent.toString('base64')
+                    }]
+                };
+
+                await PteroAPI.clientRequest(`servers/${serverUuid}/files/upload`, 'POST', uploadData);
+                successCount++;
+                console.log(`✅ Uploaded ${originalFileName} to ${serverName}`);
+
+                // Small delay to prevent API rate limiting
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+                failedCount++;
+                failedServers.push(server.attributes.name);
+                console.error(`❌ Failed to upload to ${server.attributes.name}:`, error);
+            }
+        }
+
+        let report = `✅ *Upload File ke Server User Selesai*\n\n` +
+                    `👤 **User:** ${state.userName}\n` +
+                    `📧 **Email:** ${state.userEmail}\n` +
+                    `📄 **File:** ${escapeMarkdown(originalFileName)}\n\n` +
+                    `📊 **Hasil:**\n` +
+                    `✅ **Berhasil:** ${successCount} server\n` +
+                    `❌ **Gagal:** ${failedCount} server\n` +
+                    `📈 **Total:** ${state.servers.length} server\n\n`;
+
+        if (failedServers.length > 0) {
+            report += `❌ **Server Gagal:**\n`;
+            for (const serverName of failedServers.slice(0, 5)) {
+                report += `• ${serverName}\n`;
+            }
+            if (failedServers.length > 5) {
+                report += `• ... dan ${failedServers.length - 5} server lainnya\n`;
+            }
+        }
+
+        report += `\n🎯 **File berhasil diupload ke ${successCount} server!**`;
+
+        // Clear state
+        uploadFileUserStates.delete(chatId);
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle upload file to user servers error:', error);
+        uploadFileUserStates.delete(chatId);
+        bot.sendMessage(chatId, `❌ Error saat upload file: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
 // Error handling
 bot.on('polling_error', (error) => {
     console.error('Polling error:', error.message);
@@ -6890,8 +7585,14 @@ bot.on('document', async (msg) => {
         return;
     }
 
-    // If not in setor creds mode, ignore document
-    bot.sendMessage(chatId, '📄 *File diterima*\n\nUntuk upload creds JSON, gunakan menu "📤 Setor Creds" terlebih dahulu.', {
+    // Check if user is in upload file to user servers mode
+    if (uploadFileUserStates.has(chatId)) {
+        await handleUploadFileToUserServers(chatId, msg);
+        return;
+    }
+
+    // If not in any upload mode, ignore document
+    bot.sendMessage(chatId, '📄 *File diterima*\n\nUntuk upload file, gunakan menu yang sesuai terlebih dahulu:\n• "📤 Setor Creds" untuk upload JSON\n• "📁 Upload File to User Servers" untuk upload ke server user', {
         parse_mode: 'Markdown',
         ...getMainMenu()
     });
