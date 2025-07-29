@@ -15,6 +15,10 @@ const FormData = require('form-data');
 const dns = require('dns');
 const https = require('https');
 const http = require('http');
+const yauzl = require('yauzl');
+const AdmZip = require('adm-zip');
+const tar = require('tar-stream');
+const zlib = require('zlib');
 
 // Configure DNS to use Google DNS for better connectivity
 dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1']);
@@ -51,7 +55,381 @@ const NotesModule = require('./modules/notes');
 const LocksModule = require('./modules/locks');
 
 // Global variables for state tracking
-const setorCredsState = new Map(); // Track setor creds upload state
+const createUserState = new Map(); // Track create user state
+const decompressState = new Map(); // Track decompress operations
+
+// 📦 COMPRESSED FILE DETECTION AND HANDLING
+const COMPRESSED_EXTENSIONS = {
+    '.zip': 'ZIP Archive',
+    '.jar': 'Java Archive (JAR)',
+    '.war': 'Web Archive (WAR)',
+    '.ear': 'Enterprise Archive (EAR)',
+    '.tar': 'TAR Archive',
+    '.tar.gz': 'Gzipped TAR Archive',
+    '.tgz': 'Gzipped TAR Archive',
+    '.tar.bz2': 'Bzipped TAR Archive',
+    '.tbz2': 'Bzipped TAR Archive',
+    '.gz': 'Gzip Compressed File',
+    '.bz2': 'Bzip2 Compressed File',
+    '.7z': '7-Zip Archive',
+    '.rar': 'RAR Archive'
+};
+
+// Function to detect if file is compressed
+function isCompressedFile(fileName) {
+    const lowerFileName = fileName.toLowerCase();
+
+    // Check for compound extensions first (tar.gz, tar.bz2)
+    for (const ext of ['.tar.gz', '.tar.bz2']) {
+        if (lowerFileName.endsWith(ext)) {
+            return { isCompressed: true, type: ext, description: COMPRESSED_EXTENSIONS[ext] };
+        }
+    }
+
+    // Check for single extensions
+    const fileExt = path.extname(lowerFileName);
+    if (COMPRESSED_EXTENSIONS[fileExt]) {
+        return { isCompressed: true, type: fileExt, description: COMPRESSED_EXTENSIONS[fileExt] };
+    }
+
+    return { isCompressed: false };
+}
+
+// Function to get supported decompression formats
+function getSupportedDecompressionFormats() {
+    return ['.zip', '.jar', '.war', '.ear', '.tar', '.tar.gz', '.tgz', '.gz'];
+}
+
+// Function to check if decompression is supported
+function isDecompressionSupported(fileType) {
+    return getSupportedDecompressionFormats().includes(fileType);
+}
+
+// Function to decompress file
+async function decompressFile(fileBuffer, fileName, fileType) {
+    return new Promise((resolve, reject) => {
+        try {
+            const extractedFiles = [];
+
+            if (fileType === '.zip' || fileType === '.jar' || fileType === '.war' || fileType === '.ear') {
+                // Handle ZIP-based files
+                const zip = new AdmZip(fileBuffer);
+                const zipEntries = zip.getEntries();
+
+                zipEntries.forEach(entry => {
+                    if (!entry.isDirectory) {
+                        extractedFiles.push({
+                            name: entry.entryName,
+                            content: entry.getData(),
+                            size: entry.header.size
+                        });
+                    }
+                });
+
+                resolve(extractedFiles);
+
+            } else if (fileType === '.tar') {
+                // Handle TAR files
+                const extract = tar.extract();
+                let tarData = Buffer.alloc(0);
+
+                extract.on('entry', (header, stream, next) => {
+                    if (header.type === 'file') {
+                        const chunks = [];
+                        stream.on('data', chunk => chunks.push(chunk));
+                        stream.on('end', () => {
+                            extractedFiles.push({
+                                name: header.name,
+                                content: Buffer.concat(chunks),
+                                size: header.size
+                            });
+                            next();
+                        });
+                        stream.resume();
+                    } else {
+                        stream.resume();
+                        next();
+                    }
+                });
+
+                extract.on('finish', () => {
+                    resolve(extractedFiles);
+                });
+
+                extract.on('error', reject);
+                extract.write(fileBuffer);
+                extract.end();
+
+            } else if (fileType === '.tar.gz' || fileType === '.tgz') {
+                // Handle Gzipped TAR files
+                zlib.gunzip(fileBuffer, (err, decompressed) => {
+                    if (err) return reject(err);
+
+                    const extract = tar.extract();
+
+                    extract.on('entry', (header, stream, next) => {
+                        if (header.type === 'file') {
+                            const chunks = [];
+                            stream.on('data', chunk => chunks.push(chunk));
+                            stream.on('end', () => {
+                                extractedFiles.push({
+                                    name: header.name,
+                                    content: Buffer.concat(chunks),
+                                    size: header.size
+                                });
+                                next();
+                            });
+                            stream.resume();
+                        } else {
+                            stream.resume();
+                            next();
+                        }
+                    });
+
+                    extract.on('finish', () => {
+                        resolve(extractedFiles);
+                    });
+
+                    extract.on('error', reject);
+                    extract.write(decompressed);
+                    extract.end();
+                });
+
+            } else if (fileType === '.gz') {
+                // Handle single Gzip files
+                zlib.gunzip(fileBuffer, (err, decompressed) => {
+                    if (err) return reject(err);
+
+                    const originalName = fileName.replace(/\.gz$/, '');
+                    extractedFiles.push({
+                        name: originalName,
+                        content: decompressed,
+                        size: decompressed.length
+                    });
+
+                    resolve(extractedFiles);
+                });
+
+            } else {
+                reject(new Error(`Decompression not supported for ${fileType}`));
+            }
+
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+// Handle decompress YES decision
+async function handleDecompressYes(chatId) {
+    try {
+        const decompressData = decompressState.get(chatId);
+        if (!decompressData) {
+            return bot.sendMessage(chatId, '❌ Session decompress tidak ditemukan. Mulai ulang dari menu.', getMainMenu());
+        }
+
+        const { document, state, compressionInfo, originalFileName } = decompressData;
+
+        bot.sendMessage(chatId, `📦 *Decompressing File*\n\n📄 **File:** ${escapeMarkdown(originalFileName)}\n📦 **Type:** ${compressionInfo.description}\n⏳ **Status:** Downloading dan extracting...`, { parse_mode: 'Markdown' });
+
+        // Download file from Telegram
+        let fileBuffer;
+        try {
+            const fileLink = await bot.getFileLink(document.file_id);
+            const response = await axios.get(fileLink, {
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                maxContentLength: 50 * 1024 * 1024
+            });
+            fileBuffer = Buffer.from(response.data);
+        } catch (downloadError) {
+            decompressState.delete(chatId);
+            return bot.sendMessage(chatId, `❌ Error downloading file: ${escapeMarkdown(downloadError.message)}`, getMainMenu());
+        }
+
+        // Decompress file
+        let extractedFiles;
+        try {
+            extractedFiles = await decompressFile(fileBuffer, originalFileName, compressionInfo.type);
+        } catch (decompressError) {
+            decompressState.delete(chatId);
+            return bot.sendMessage(chatId, `❌ Error decompressing file: ${escapeMarkdown(decompressError.message)}`, getMainMenu());
+        }
+
+        if (extractedFiles.length === 0) {
+            decompressState.delete(chatId);
+            return bot.sendMessage(chatId, `❌ No files found in archive: ${escapeMarkdown(originalFileName)}`, getMainMenu());
+        }
+
+        bot.sendMessage(chatId, `✅ *Decompression Successful*\n\n📦 **Archive:** ${escapeMarkdown(originalFileName)}\n📄 **Extracted:** ${extractedFiles.length} files\n📊 **Target:** ${state.servers.length} servers\n\n⏳ **Uploading extracted files...**`, { parse_mode: 'Markdown' });
+
+        // Upload each extracted file to all servers
+        let totalSuccess = 0;
+        let totalFailed = 0;
+        const uploadResults = [];
+
+        for (const extractedFile of extractedFiles) {
+            let fileSuccess = 0;
+            let fileFailed = 0;
+
+            for (const server of state.servers) {
+                try {
+                    const serverUuid = server.attributes.uuid;
+                    const serverName = server.attributes.name;
+
+                    // Upload via API
+                    await PteroAPI.clientRequest(`servers/${serverUuid}/files/write`, 'POST', {
+                        root: '/',
+                        file: extractedFile.name,
+                        content: extractedFile.content.toString('base64')
+                    });
+
+                    fileSuccess++;
+                    totalSuccess++;
+                } catch (uploadError) {
+                    fileFailed++;
+                    totalFailed++;
+                    console.error(`Failed to upload ${extractedFile.name} to ${server.attributes.name}:`, uploadError.message);
+                }
+            }
+
+            uploadResults.push({
+                fileName: extractedFile.name,
+                size: extractedFile.size,
+                success: fileSuccess,
+                failed: fileFailed
+            });
+        }
+
+        // Generate report
+        let report = `📦 *Decompress & Upload Complete*\n\n`;
+        report += `📄 **Original:** ${escapeMarkdown(originalFileName)}\n`;
+        report += `📊 **Extracted:** ${extractedFiles.length} files\n`;
+        report += `🎯 **Target:** ${state.servers.length} servers\n\n`;
+        report += `📈 **Results:**\n`;
+        report += `✅ **Success:** ${totalSuccess} uploads\n`;
+        report += `❌ **Failed:** ${totalFailed} uploads\n\n`;
+
+        if (uploadResults.length <= 10) {
+            report += `📋 **File Details:**\n`;
+            uploadResults.forEach(result => {
+                const sizeKB = (result.size / 1024).toFixed(1);
+                report += `• ${result.fileName} (${sizeKB}KB): ${result.success}✅ ${result.failed}❌\n`;
+            });
+        } else {
+            report += `📋 **Sample Files:**\n`;
+            uploadResults.slice(0, 5).forEach(result => {
+                const sizeKB = (result.size / 1024).toFixed(1);
+                report += `• ${result.fileName} (${sizeKB}KB): ${result.success}✅ ${result.failed}❌\n`;
+            });
+            report += `• ... dan ${uploadResults.length - 5} file lainnya\n`;
+        }
+
+        // Clear states
+        decompressState.delete(chatId);
+        uploadFileUserStates.delete(chatId);
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle decompress yes error:', error);
+        decompressState.delete(chatId);
+        bot.sendMessage(chatId, `❌ Error during decompression: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
+
+// Handle decompress NO decision
+async function handleDecompressNo(chatId) {
+    try {
+        const decompressData = decompressState.get(chatId);
+        if (!decompressData) {
+            return bot.sendMessage(chatId, '❌ Session decompress tidak ditemukan. Mulai ulang dari menu.', getMainMenu());
+        }
+
+        const { document, state, originalFileName } = decompressData;
+
+        // Clear decompress state
+        decompressState.delete(chatId);
+
+        // Continue with normal upload process (upload compressed file as-is)
+        bot.sendMessage(chatId, `📤 *Uploading Compressed File*\n\n📄 **File:** ${escapeMarkdown(originalFileName)}\n📊 **Target:** ${state.servers.length} servers\n⏳ **Status:** Processing...`, { parse_mode: 'Markdown' });
+
+        // Download and upload compressed file directly
+        let fileContent;
+        try {
+            const fileLink = await bot.getFileLink(document.file_id);
+            const response = await axios.get(fileLink, {
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                maxContentLength: 50 * 1024 * 1024
+            });
+            fileContent = Buffer.from(response.data);
+        } catch (downloadError) {
+            return bot.sendMessage(chatId, `❌ Error downloading file: ${escapeMarkdown(downloadError.message)}`, getMainMenu());
+        }
+
+        // Upload compressed file to all servers
+        let successCount = 0;
+        let failedCount = 0;
+        const failedServers = [];
+
+        for (const server of state.servers) {
+            try {
+                const serverUuid = server.attributes.uuid;
+                const serverName = server.attributes.name;
+
+                // Upload via form-data to root directory
+                const formData = new FormData();
+                formData.append('files', fileContent, {
+                    filename: originalFileName,
+                    contentType: 'application/octet-stream'
+                });
+                formData.append('directory', '/');
+
+                await PteroAPI.clientRequest(
+                    `servers/${serverUuid}/files/upload`,
+                    'POST',
+                    formData,
+                    formData.getHeaders()
+                );
+
+                successCount++;
+                console.log(`✅ Uploaded compressed file to ${serverName}`);
+
+            } catch (uploadError) {
+                failedCount++;
+                failedServers.push(server.attributes.name);
+                console.error(`❌ Failed to upload to ${server.attributes.name}:`, uploadError.message);
+            }
+        }
+
+        // Generate report
+        let report = `📤 *Upload Compressed File Complete*\n\n`;
+        report += `📄 **File:** ${escapeMarkdown(originalFileName)}\n`;
+        report += `📊 **Size:** ${(document.file_size / 1024).toFixed(1)} KB\n`;
+        report += `🎯 **Target:** ${state.servers.length} servers\n\n`;
+        report += `📈 **Results:**\n`;
+        report += `✅ **Success:** ${successCount} servers\n`;
+        report += `❌ **Failed:** ${failedCount} servers\n`;
+
+        if (failedServers.length > 0 && failedServers.length <= 5) {
+            report += `\n❌ **Failed Servers:**\n`;
+            failedServers.forEach(serverName => {
+                report += `• ${serverName}\n`;
+            });
+        }
+
+        // Clear state
+        uploadFileUserStates.delete(chatId);
+
+        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
+
+    } catch (error) {
+        console.error('Handle decompress no error:', error);
+        decompressState.delete(chatId);
+        bot.sendMessage(chatId, `❌ Error: ${escapeMarkdown(error.message)}`, getMainMenu());
+    }
+}
 
 // Helper function to check if panel is blacklisted
 function isPanelBlacklisted(panelUrl) {
@@ -947,19 +1325,6 @@ function getMainMenu() {
                     { text: '🔧 Reinstall Server per User', callback_data: 'reinstall_per_user' }
                 ],
                 [
-                    { text: '📁 Create Session Folders (All Servers)', callback_data: 'auto_session_folder' },
-                    { text: '🔑 Auto Creds.json', callback_data: 'auto_creds_json' }
-                ],
-                [
-                    { text: '🗑️ Delete All Session Folders', callback_data: 'delete_session_folder' }
-                ],
-                [
-                    { text: '🔍 Scrape Creds External Panel', callback_data: 'scrape_external_creds' }
-                ],
-                [
-                    { text: '📤 Setor Sender (Upload JSON Files)', callback_data: 'setor_creds' }
-                ],
-                [
                     { text: '📊 Statistik Server', callback_data: 'server_stats' },
                     { text: '🏥 Cek Kesehatan', callback_data: 'health_check' }
                 ],
@@ -969,6 +1334,10 @@ function getMainMenu() {
                 [
                     { text: '👤 User Management', callback_data: 'user_management' },
                     { text: '📁 File Management', callback_data: 'file_management' }
+                ],
+                [
+                    { text: '➕ Create User Admin', callback_data: 'create_admin_user' },
+                    { text: '👥 Create User Biasa', callback_data: 'create_regular_user' }
                 ]
             ]
         }
@@ -1409,15 +1778,7 @@ bot.on('message', async (msg) => {
     // Skip if not owner
     if (!isOwner(userId)) return;
 
-    // Handle /done command for setor creds
-    if (msg.text === '/done') {
-        if (setorCredsState.has(chatId)) {
-            await handleSetorCredsDone(chatId);
-        } else {
-            bot.sendMessage(chatId, '❌ Tidak ada proses upload yang sedang berlangsung.', getMainMenu());
-        }
-        return;
-    }
+
 
     // Handle /cancel command for blacklist
     if (msg.text === '/cancel') {
@@ -1433,16 +1794,19 @@ bot.on('message', async (msg) => {
         return;
     }
 
+    // Handle create user input
+    if (createUserState.has(chatId)) {
+        await handleCreateUserInput(chatId, msg.text);
+        return;
+    }
+
     // Skip if it's a command
     if (msg.text && msg.text.startsWith('/')) return;
 
     // Skip if it's not a text message
     if (!msg.text) return;
 
-    // Check if user is waiting for creds.json input
-    if (waitingForCredsJson.has(chatId)) {
-        await processCredsJsonInput(chatId, msg.text);
-    }
+
 });
 
 // Handle callback queries
@@ -1470,21 +1834,7 @@ bot.on('callback_query', async (query) => {
         case 'manage_servers':
             await handleManageServers(chatId);
             break;
-        case 'auto_session_folder':
-            await handleAutoSessionFolder(chatId);
-            break;
-        case 'auto_creds_json':
-            await handleAutoCredsJson(chatId);
-            break;
-        case 'delete_session_folder':
-            await handleDeleteSessionFolder(chatId);
-            break;
-        case 'copy_external_creds':
-            await handleCopyExternalCreds(chatId);
-            break;
-        case 'scrape_external_creds':
-            await handleScrapeExternalCreds(chatId);
-            break;
+
 
         case 'server_stats':
             await handleServerStats(chatId);
@@ -1549,6 +1899,12 @@ Selamat datang! Pilih aksi yang diinginkan:`;
         case 'file_management':
             await handleFileManagement(chatId);
             break;
+        case 'create_admin_user':
+            await handleCreateAdminUser(chatId);
+            break;
+        case 'create_regular_user':
+            await handleCreateRegularUser(chatId);
+            break;
         case 'manage_blacklist':
             await handleManageBlacklist(chatId);
             break;
@@ -1558,13 +1914,13 @@ Selamat datang! Pilih aksi yang diinginkan:`;
         case 'remove_blacklist':
             await handleRemoveBlacklist(chatId);
             break;
+        case 'cancel_create_user':
+            createUserState.delete(chatId);
+            bot.sendMessage(chatId, '❌ Pembuatan user dibatalkan.', getMainMenu());
+            break;
         default:
-            // Handle confirm_delete_all_sessions callback
-            if (data === 'confirm_delete_all_sessions') {
-                await executeDeleteAllSessions(chatId);
-            }
             // Handle delete_user_ callbacks
-            else if (data.startsWith('delete_user_')) {
+            if (data.startsWith('delete_user_')) {
                 const userId = data.replace('delete_user_', '');
                 await handleDeleteSessionForUser(chatId, userId);
             }
@@ -1583,42 +1939,10 @@ Selamat datang! Pilih aksi yang diinginkan:`;
                 const userId = data.replace('confirm_copy_external_user_', '');
                 await executeCopyExternalCredsForUser(chatId, userId);
             }
-            // Handle delete_external_sessions callback
-            else if (data === 'delete_external_sessions') {
-                await handleDeleteExternalSessions(chatId);
-            }
-            // Handle confirm_delete_external_sessions callback
-            else if (data === 'confirm_delete_external_sessions') {
-                await executeDeleteExternalSessions(chatId);
-            }
-            // Handle setor_creds callback
-            else if (data === 'setor_creds') {
-                await handleSetorCreds(chatId);
-            }
-            // Handle setor_creds_done callback
-            else if (data === 'setor_creds_done') {
-                await handleSetorCredsDone(chatId);
-            }
-            // Handle setor_creds_cancel callback
-            else if (data === 'setor_creds_cancel') {
-                await handleSetorCredsCancel(chatId);
-            }
-            // Handle setor_creds_restart_yes callback
-            else if (data === 'setor_creds_restart_yes') {
-                await handleSetorCredsRestartYes(chatId);
-            }
-            // Handle setor_creds_restart_no callback
-            else if (data === 'setor_creds_restart_no') {
-                await handleSetorCredsRestartNo(chatId);
-            }
-            // Handle scrape_external_start callback
-            else if (data === 'scrape_external_start') {
-                await executeScrapeExternalCreds(chatId);
-            }
-            // Handle scrape_external_cancel callback
-            else if (data === 'scrape_external_cancel') {
-                bot.sendMessage(chatId, '❌ *Scraping Dibatalkan*\n\nOperasi scraping creds dari panel eksternal dibatalkan.', { parse_mode: 'Markdown', ...getMainMenu() });
-            }
+
+
+
+
 
             // Handle delete_external_creds_yes callback
             else if (data === 'delete_external_creds_yes') {
@@ -1636,11 +1960,7 @@ Selamat datang! Pilih aksi yang diinginkan:`;
                 const index = parseInt(data.replace('blacklist_remove_', ''));
                 await executeRemoveBlacklist(chatId, index);
             }
-            // Handle creds_server_ callbacks
-            else if (data.startsWith('creds_server_')) {
-                const serverUuid = data.replace('creds_server_', '');
-                await handleCredsForServer(chatId, serverUuid);
-            }
+
             // Handle create_server_* callbacks
             else if (data.startsWith('create_server_')) {
                 const userId = data.replace('create_server_', '');
@@ -1744,7 +2064,15 @@ Selamat datang! Pilih aksi yang diinginkan:`;
             }
             else if (data === 'upload_file_user_cancel') {
                 uploadFileUserStates.delete(chatId);
+                decompressState.delete(chatId);
                 bot.sendMessage(chatId, '❌ Upload file dibatalkan.', getMainMenu());
+            }
+            // Handle decompress decision callbacks
+            else if (data.startsWith('decompress_yes_')) {
+                await handleDecompressYes(chatId);
+            }
+            else if (data.startsWith('decompress_no_')) {
+                await handleDecompressNo(chatId);
             }
             else {
                 bot.sendMessage(chatId, '❓ Aksi tidak dikenal.', getMainMenu());
@@ -3491,129 +3819,7 @@ async function executeCreateServers(chatId, userId, quantity) {
     }
 }
 
-// Auto Session Folder Management
-async function handleAutoSessionFolder(chatId) {
-    try {
-        // Check if main panel is blacklisted
-        if (isPanelBlacklisted(PANEL_URL)) {
-            return bot.sendMessage(chatId, `❌ *Panel Diblacklist*\n\nPanel ${PANEL_URL} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
-        }
 
-        bot.sendMessage(chatId, '📁 *Create Session Folders (All Servers)*\n\nMengambil daftar semua server...', { parse_mode: 'Markdown' });
-
-        // Get all servers directly (no user filtering)
-        const servers = await PteroAPI.getAllServers();
-
-        if (servers.length === 0) {
-            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan!', getMainMenu());
-        }
-
-        bot.sendMessage(chatId, `📊 Ditemukan ${servers.length} server total. Memulai proses pembuatan folder session via API...`);
-
-        let createdCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        const errorDetails = [];
-        const createdServers = [];
-
-        for (const server of servers) {
-            try {
-                const serverName = server.attributes.name;
-                const serverUuid = server.attributes.uuid;
-
-                console.log(`📁 Processing ${serverName} (${serverUuid})`);
-
-                // First check if session folder already exists
-                try {
-                    const filesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list`, 'GET');
-                    const existingFiles = filesResponse.data || [];
-                    
-                    const sessionExists = existingFiles.some(file => 
-                        !file.attributes.is_file && file.attributes.name === 'session'
-                    );
-
-                    if (sessionExists) {
-                        skippedCount++;
-                        console.log(`⏭️ Session folder already exists for ${serverName}, skipping...`);
-                        continue;
-                    }
-                } catch (listError) {
-                    console.log(`⚠️ Could not check existing files for ${serverName}: ${listError.message}`);
-                }
-
-                // Create session folder via API
-                try {
-                    await PteroAPI.clientRequest(`servers/${serverUuid}/files/create-folder`, 'POST', {
-                        root: '/',
-                        name: 'session'
-                    });
-
-                    createdCount++;
-                    createdServers.push(serverName);
-                    console.log(`✅ Created session folder for ${serverName} via API`);
-
-                } catch (createError) {
-                    errorCount++;
-                    const errorMsg = `${serverName}: ${createError.response?.data?.errors?.[0]?.detail || createError.message}`;
-                    errorDetails.push(errorMsg);
-                    console.error(`❌ Error creating session folder for ${serverName}:`, createError.response?.data || createError.message);
-                }
-
-            } catch (error) {
-                errorCount++;
-                const errorMsg = `${server.attributes.name}: ${escapeMarkdown(error.message)}`;
-                errorDetails.push(errorMsg);
-                console.error(`❌ Error processing ${server.attributes.name}:`, error);
-            }
-
-            // Small delay to prevent API rate limiting
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        let report = `📁 *Create Session Folders Selesai*\n\n` +
-                      `🌐 **Method:** Pterodactyl API\n` +
-                      `📊 **Hasil:**\n` +
-                      `✅ Dibuat: ${createdCount} folder\n` +
-                      `⏭️ Dilewati: ${skippedCount} folder (sudah ada)\n` +
-                      `❌ Error: ${errorCount} folder\n\n` +
-                      `📈 **Total Server:** ${servers.length}\n` +
-                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
-
-        // Add error details if any
-        if (errorDetails.length > 0) {
-            report += `\n\n❌ **Detail Error:**\n`;
-            errorDetails.slice(0, 5).forEach(error => {
-                report += `• ${error}\n`;
-            });
-            if (errorDetails.length > 5) {
-                report += `• ... dan ${errorDetails.length - 5} error lainnya\n`;
-            }
-        }
-
-        // Show some created servers
-        if (createdServers.length > 0) {
-            report += `\n\n✅ **Sample Created:**\n`;
-            createdServers.slice(0, 5).forEach(serverName => {
-                report += `• ${serverName}\n`;
-            });
-            if (createdServers.length > 5) {
-                report += `• ... dan ${createdServers.length - 5} server lainnya\n`;
-            }
-        }
-
-        // Success message
-        if (createdCount > 0) {
-            report += `\n\n✅ **Verifikasi:**\n`;
-            report += `Folder session sudah dibuat via API dan langsung muncul di panel web!`;
-        }
-
-        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
-
-    } catch (error) {
-        console.error('Auto session folder error:', error);
-        bot.sendMessage(chatId, `❌ Error saat membuat session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
-    }
-}
 
 async function handleSessionFolderForUser(chatId, userId) {
     try {
@@ -3734,168 +3940,9 @@ async function handleSessionFolderForUser(chatId, userId) {
     }
 }
 
-// Auto Creds.json Management
-let waitingForCredsJson = new Map(); // Store users waiting for creds.json input
 
-async function handleAutoCredsJson(chatId) {
-    try {
-        bot.sendMessage(chatId, '🔑 *Auto Creds.json*\n\nMengambil daftar server...', { parse_mode: 'Markdown' });
 
-        const servers = await PteroAPI.getAllServers();
 
-        if (servers.length === 0) {
-            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan!', getMainMenu());
-        }
-
-        // Filter servers that need creds.json (have session folder but no creds.json)
-        const serversNeedCreds = [];
-
-        for (const server of servers) {
-            const serverUuid = server.attributes.uuid;
-            
-            try {
-                // Get files list via API
-                const filesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list`, 'GET');
-                const files = filesResponse.data || [];
-                
-                // Check if session folder exists
-                const sessionExists = files.some(file => 
-                    !file.attributes.is_file && file.attributes.name === 'session'
-                );
-                
-                if (sessionExists) {
-                    // Check if creds.json exists in session folder
-                    try {
-                        const sessionFilesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list?directory=%2Fsession`, 'GET');
-                        const sessionFiles = sessionFilesResponse.data || [];
-                        
-                        const credsExists = sessionFiles.some(file => 
-                            file.attributes.is_file && file.attributes.name === 'creds.json'
-                        );
-                        
-                        if (!credsExists) {
-                            serversNeedCreds.push(server);
-                        }
-                    } catch (sessionError) {
-                        // If can't list session folder, assume no creds.json
-                        serversNeedCreds.push(server);
-                    }
-                }
-            } catch (pathError) {
-                console.log(`Skipping server ${server.attributes.name}: ${pathError.message}`);
-                continue;
-            }
-            
-            // Small delay to prevent API rate limiting
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-
-        if (serversNeedCreds.length === 0) {
-            return bot.sendMessage(chatId, '✅ Semua server sudah memiliki creds.json atau tidak memiliki folder session!', getMainMenu());
-        }
-
-        // Create server selection keyboard
-        const serverButtons = [];
-        for (let i = 0; i < serversNeedCreds.length; i += 1) {
-            const server = serversNeedCreds[i];
-            const serverName = server.attributes.name.length > 25
-                ? server.attributes.name.substring(0, 25) + '...'
-                : server.attributes.name;
-            serverButtons.push([{
-                text: `🖥️ ${serverName}`,
-                callback_data: `creds_server_${server.attributes.uuid}`
-            }]);
-        }
-
-        serverButtons.push([{ text: '🏠 Menu Utama', callback_data: 'main_menu' }]);
-
-        const text = `🔑 *Pilih Server untuk Creds.json*\n\n` +
-                    `📊 Total Server: ${servers.length}\n` +
-                    `📁 Butuh Creds.json: ${serversNeedCreds.length}\n\n` +
-                    `Pilih server yang ingin ditambahkan creds.json:`;
-
-        bot.sendMessage(chatId, text, {
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: serverButtons }
-        });
-
-    } catch (error) {
-        console.error('Auto creds.json error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses creds.json: ${escapeMarkdown(error.message)}`, getMainMenu());
-    }
-}
-
-async function handleCredsForServer(chatId, serverUuid) {
-    try {
-        // Get server info
-        const servers = await PteroAPI.getAllServers();
-        const server = servers.find(s => s.attributes.uuid === serverUuid);
-
-        if (!server) {
-            return bot.sendMessage(chatId, '❌ Server tidak ditemukan!', getMainMenu());
-        }
-
-        const serverName = server.attributes.name;
-        
-        // Check if session folder exists via API
-        try {
-            const filesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list`, 'GET');
-            const files = filesResponse.data || [];
-            
-            const sessionExists = files.some(file => 
-                !file.attributes.is_file && file.attributes.name === 'session'
-            );
-            
-            if (!sessionExists) {
-                return bot.sendMessage(chatId, `❌ Folder session tidak ditemukan untuk server ${serverName}!\n\n` +
-                    `Buat folder session terlebih dahulu dengan fitur "📁 Create Session Folders (All Servers)".`, 
-                    { parse_mode: 'Markdown', ...getMainMenu() });
-            }
-            
-            // Check if creds.json already exists
-            try {
-                const sessionFilesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list?directory=%2Fsession`, 'GET');
-                const sessionFiles = sessionFilesResponse.data || [];
-                
-                const credsExists = sessionFiles.some(file => 
-                    file.attributes.is_file && file.attributes.name === 'creds.json'
-                );
-                
-                if (credsExists) {
-                    return bot.sendMessage(chatId, `❌ Server ${serverName} sudah memiliki creds.json!`, getMainMenu());
-                }
-            } catch (sessionError) {
-                // If can't list session folder, continue anyway
-                console.log(`Warning: Could not check session folder contents for ${serverName}: ${sessionError.message}`);
-            }
-            
-        } catch (apiError) {
-            return bot.sendMessage(chatId, `❌ *Error: Tidak dapat mengakses server*\n\n` +
-                `Server: ${serverName}\n` +
-                `Error: ${apiError.message}\n\n` +
-                `Pastikan server dapat diakses melalui API.`, 
-                { parse_mode: 'Markdown', ...getMainMenu() });
-        }
-
-        const text = `🔑 *Tambah Creds.json*\n\n` +
-                    `🖥️ **Server:** ${serverName}\n` +
-                    `📁 **Target:** /session/creds.json\n\n` +
-                    `📝 Silakan kirim konten creds.json untuk server ini:`;
-
-        // Set user as waiting for creds.json input for specific server
-        waitingForCredsJson.set(chatId, {
-            serverUuid,
-            serverName,
-            method: 'api' // Use API method instead of file system
-        });
-
-        bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
-
-    } catch (error) {
-        console.error('Creds for server error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses server: ${escapeMarkdown(error.message)}`, getMainMenu());
-    }
-}
 
 async function processCredsJsonInput(chatId, credsContent) {
     try {
@@ -3979,187 +4026,7 @@ async function processCredsJsonInput(chatId, credsContent) {
     }
 }
 
-// Delete Session Folder Management
-async function handleDeleteSessionFolder(chatId) {
-    try {
-        // Check if main panel is blacklisted
-        if (isPanelBlacklisted(PANEL_URL)) {
-            return bot.sendMessage(chatId, `❌ *Panel Diblacklist*\n\nPanel ${PANEL_URL} tidak diizinkan untuk operasi ini.\n\nHubungi admin untuk informasi lebih lanjut.`, { parse_mode: 'Markdown', ...getMainMenu() });
-        }
 
-        bot.sendMessage(chatId, '🗑️ *Delete All Session Folders*\n\nMengambil daftar server dan checking session folders...', { parse_mode: 'Markdown' });
-
-        // Get all servers directly
-        const servers = await PteroAPI.getAllServers();
-
-        if (servers.length === 0) {
-            return bot.sendMessage(chatId, '❌ Tidak ada server ditemukan!', getMainMenu());
-        }
-
-        // Check how many servers have session folders via API
-        let hasSessionCount = 0;
-        for (const server of servers) {
-            const serverUuid = server.attributes.uuid;
-            
-            try {
-                const filesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list`, 'GET');
-                const files = filesResponse.data || [];
-                
-                const sessionExists = files.some(file => 
-                    !file.attributes.is_file && file.attributes.name === 'session'
-                );
-
-                if (sessionExists) {
-                    hasSessionCount++;
-                }
-            } catch (apiError) {
-                console.log(`Could not check ${server.attributes.name}: ${apiError.message}`);
-                continue;
-            }
-            
-            // Small delay to prevent API rate limiting
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-
-        if (hasSessionCount === 0) {
-            return bot.sendMessage(chatId, `❌ Tidak ada server yang memiliki folder session!`, getMainMenu());
-        }
-
-        bot.sendMessage(chatId, `⚠️ *KONFIRMASI DELETE ALL SESSION FOLDERS*\n\n` +
-                              `📊 **Total Server:** ${servers.length}\n` +
-                              `📁 **Memiliki Session Folder:** ${hasSessionCount}\n\n` +
-                              `🚨 **PERINGATAN:**\n` +
-                              `• Ini akan menghapus SEMUA folder session dari semua server\n` +
-                              `• Semua file di dalam folder session akan hilang\n` +
-                              `• Aksi ini TIDAK BISA dibatalkan!\n` +
-                              `• Menggunakan Pterodactyl API\n\n` +
-                              `Apakah Anda yakin ingin melanjutkan?`, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: '✅ Ya, Hapus Semua Session Folder', callback_data: `confirm_delete_all_sessions` },
-                        { text: '❌ Batal', callback_data: 'main_menu' }
-                    ]
-                ]
-            }
-        });
-
-    } catch (error) {
-        console.error('Delete session folder error:', error);
-        bot.sendMessage(chatId, `❌ Error saat memproses session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
-    }
-}
-
-async function executeDeleteAllSessions(chatId) {
-    try {
-        bot.sendMessage(chatId, '🗑️ *Menghapus Semua Session Folder*\n\nMemulai proses penghapusan via API...', { parse_mode: 'Markdown' });
-
-        // Get all servers
-        const servers = await PteroAPI.getAllServers();
-
-        let deletedCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        const errorDetails = [];
-        const deletedServers = [];
-
-        for (const server of servers) {
-            try {
-                const serverName = server.attributes.name;
-                const serverUuid = server.attributes.uuid;
-
-                console.log(`🗑️ Processing ${serverName} (${serverUuid})`);
-
-                // Check if session folder exists via API
-                try {
-                    const filesResponse = await PteroAPI.clientRequest(`servers/${serverUuid}/files/list`, 'GET');
-                    const files = filesResponse.data || [];
-                    
-                    const sessionExists = files.some(file => 
-                        !file.attributes.is_file && file.attributes.name === 'session'
-                    );
-
-                    if (!sessionExists) {
-                        skippedCount++;
-                        console.log(`⏭️ Session folder not found for ${serverName}, skipping...`);
-                        continue;
-                    }
-                } catch (listError) {
-                    skippedCount++;
-                    const errorMsg = `${serverName}: Could not check files`;
-                    errorDetails.push(errorMsg);
-                    console.log(`❌ Could not check files for ${serverName}: ${listError.message}`);
-                    continue;
-                }
-
-                // Delete session folder via API
-                try {
-                    await PteroAPI.clientRequest(`servers/${serverUuid}/files/delete`, 'POST', {
-                        root: '/',
-                        files: ['session']
-                    });
-
-                    deletedCount++;
-                    deletedServers.push(serverName);
-                    console.log(`✅ Deleted session folder for ${serverName} via API`);
-
-                } catch (deleteError) {
-                    errorCount++;
-                    const errorMsg = `${serverName}: ${deleteError.response?.data?.errors?.[0]?.detail || deleteError.message}`;
-                    errorDetails.push(errorMsg);
-                    console.error(`❌ Error deleting session folder for ${serverName}:`, deleteError.response?.data || deleteError.message);
-                }
-
-            } catch (error) {
-                errorCount++;
-                const errorMsg = `${server.attributes.name}: ${escapeMarkdown(error.message)}`;
-                errorDetails.push(errorMsg);
-                console.error(`❌ Error processing ${server.attributes.name}:`, error);
-            }
-
-            // Small delay to prevent API rate limiting
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        let report = `🗑️ *Delete All Session Folders Selesai*\n\n` +
-                      `🌐 **Method:** Pterodactyl API\n` +
-                      `📊 **Hasil:**\n` +
-                      `🗑️ Dihapus: ${deletedCount} folder\n` +
-                      `⏭️ Dilewati: ${skippedCount} folder (tidak ada/error)\n` +
-                      `❌ Error: ${errorCount} folder\n\n` +
-                      `📈 **Total Server:** ${servers.length}\n` +
-                      `⏰ **Selesai:** ${new Date().toLocaleString('id-ID')}`;
-
-        // Add error details if any
-        if (errorDetails.length > 0) {
-            report += `\n\n❌ **Detail Error:**\n`;
-            errorDetails.slice(0, 5).forEach(error => {
-                report += `• ${error}\n`;
-            });
-            if (errorDetails.length > 5) {
-                report += `• ... dan ${errorDetails.length - 5} error lainnya\n`;
-            }
-        }
-
-        // Show some deleted servers
-        if (deletedServers.length > 0) {
-            report += `\n\n🗑️ **Sample Deleted:**\n`;
-            deletedServers.slice(0, 5).forEach(serverName => {
-                report += `• ${serverName}\n`;
-            });
-            if (deletedServers.length > 5) {
-                report += `• ... dan ${deletedServers.length - 5} server lainnya\n`;
-            }
-        }
-
-        bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...getMainMenu() });
-
-    } catch (error) {
-        console.error('Execute delete all sessions error:', error);
-        bot.sendMessage(chatId, `❌ Error saat menghapus session folder: ${escapeMarkdown(error.message)}`, getMainMenu());
-    }
-}
 
 async function handleDeleteSessionForUser(chatId, userId) {
     try {
@@ -7541,13 +7408,65 @@ async function handleUploadFileToUserServers(chatId, msg) {
             return bot.sendMessage(chatId, '❌ Session upload file tidak ditemukan. Mulai ulang dari menu.', getMainMenu());
         }
 
-        // Check file extension
+        // Check file extension and detect compressed files
         const originalFileName = document.file_name || 'unknown.file';
         const fileExt = path.extname(originalFileName).toLowerCase();
         const allowedExtensions = ['.json', '.txt', '.js', '.py', '.sh', '.yml', '.yaml', '.env', '.conf', '.cfg'];
 
+        // Check if file is compressed
+        const compressionInfo = isCompressedFile(originalFileName);
+
+        if (compressionInfo.isCompressed) {
+            // Handle compressed file
+            if (isDecompressionSupported(compressionInfo.type)) {
+                // Offer decompression option
+                const message = `📦 *Compressed File Detected*\n\n` +
+                              `📄 **File:** ${escapeMarkdown(originalFileName)}\n` +
+                              `📦 **Type:** ${compressionInfo.description}\n` +
+                              `📊 **Size:** ${(document.file_size / 1024).toFixed(1)} KB\n\n` +
+                              `🤔 **Sekalian decompress?**\n\n` +
+                              `✅ **Ya** - Extract dan upload semua file di dalamnya\n` +
+                              `📤 **Tidak** - Upload file compressed apa adanya\n\n` +
+                              `⚠️ **Note:** Decompression akan extract semua file ke server`;
+
+                const keyboard = {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Ya, Decompress', callback_data: `decompress_yes_${chatId}_${Date.now()}` },
+                                { text: '📤 Tidak, Upload Apa Adanya', callback_data: `decompress_no_${chatId}_${Date.now()}` }
+                            ],
+                            [
+                                { text: '❌ Batal', callback_data: 'upload_file_user_cancel' }
+                            ]
+                        ]
+                    }
+                };
+
+                // Store file info for decompression decision
+                decompressState.set(chatId, {
+                    document: document,
+                    state: state,
+                    compressionInfo: compressionInfo,
+                    originalFileName: originalFileName
+                });
+
+                return bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...keyboard });
+
+            } else {
+                // Unsupported compression format
+                return bot.sendMessage(chatId, `❌ *Compressed File Not Supported*\n\n` +
+                    `📄 **File:** ${escapeMarkdown(originalFileName)}\n` +
+                    `📦 **Type:** ${compressionInfo.description}\n\n` +
+                    `🚫 **Decompression tidak didukung untuk format ini**\n\n` +
+                    `✅ **Supported formats:** ${getSupportedDecompressionFormats().join(', ')}\n` +
+                    `📤 **Alternative:** Upload file individual atau convert ke format yang didukung`,
+                    { parse_mode: 'Markdown' });
+            }
+        }
+
         if (!allowedExtensions.includes(fileExt)) {
-            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${escapeMarkdown(originalFileName)}\nAlasan: Format file tidak didukung\n\nFormat yang didukung: ${allowedExtensions.join(', ')}`, { parse_mode: 'Markdown' });
+            return bot.sendMessage(chatId, `❌ *File Ditolak*\n\nFile: ${escapeMarkdown(originalFileName)}\nAlasan: Format file tidak didukung\n\nFormat yang didukung: ${allowedExtensions.join(', ')}\n\n📦 **Compressed files:** ${getSupportedDecompressionFormats().join(', ')} (dengan auto-decompress)`, { parse_mode: 'Markdown' });
         }
 
         // Check file size (max 20MB)
@@ -7818,11 +7737,7 @@ bot.on('polling_error', (error) => {
 bot.on('document', async (msg) => {
     const chatId = msg.chat.id;
 
-    // Check if user is in setor creds mode
-    if (setorCredsState.has(chatId)) {
-        await handleSetorCredsUpload(chatId, msg);
-        return;
-    }
+
 
     // Check if user is in upload file to user servers mode
     if (uploadFileUserStates.has(chatId)) {
@@ -7837,6 +7752,150 @@ bot.on('document', async (msg) => {
         ...getMainMenu()
     });
 });
+
+// 👤 CREATE USER FUNCTIONS
+async function handleCreateAdminUser(chatId) {
+    const text = `➕ *Create User Admin*\n\n` +
+                `Masukkan **username** saja untuk membuat user admin baru:\n\n` +
+                `**Contoh:** \`cihuy\`\n\n` +
+                `**Auto Generate:**\n` +
+                `• 📧 Email: username@cihuy.com\n` +
+                `• 👤 First Name: Username (capitalize)\n` +
+                `• 👤 Last Name: Private\n` +
+                `• 🔑 Password: 1\n` +
+                `• 👑 Role: Admin\n\n` +
+                `Ketik \`/cancel\` untuk membatalkan.`;
+
+    createUserState.set(chatId, { type: 'admin' });
+
+    bot.sendMessage(chatId, text, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: [[
+                { text: '❌ Cancel', callback_data: 'cancel_create_user' },
+                { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+            ]]
+        }
+    });
+}
+
+async function handleCreateRegularUser(chatId) {
+    const text = `👥 *Create User Biasa*\n\n` +
+                `Masukkan **username** saja untuk membuat user biasa baru:\n\n` +
+                `**Contoh:** \`cihuy\`\n\n` +
+                `**Auto Generate:**\n` +
+                `• 📧 Email: username@cihuy.com\n` +
+                `• 👤 First Name: Username (capitalize)\n` +
+                `• 👤 Last Name: Private\n` +
+                `• 🔑 Password: 1\n` +
+                `• 👤 Role: User Biasa\n\n` +
+                `Ketik \`/cancel\` untuk membatalkan.`;
+
+    createUserState.set(chatId, { type: 'regular' });
+
+    bot.sendMessage(chatId, text, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: [[
+                { text: '❌ Cancel', callback_data: 'cancel_create_user' },
+                { text: '🏠 Menu Utama', callback_data: 'main_menu' }
+            ]]
+        }
+    });
+}
+
+async function handleCreateUserInput(chatId, input) {
+    try {
+        const userState = createUserState.get(chatId);
+        if (!userState) {
+            return bot.sendMessage(chatId, '❌ Session expired. Silakan mulai lagi.', getMainMenu());
+        }
+
+        // Handle cancel command
+        if (input.toLowerCase() === '/cancel') {
+            createUserState.delete(chatId);
+            return bot.sendMessage(chatId, '❌ Pembuatan user dibatalkan.', getMainMenu());
+        }
+
+        // Clean username input
+        const username = input.trim().toLowerCase();
+
+        // Validation
+        if (username.length < 3) {
+            return bot.sendMessage(chatId, `❌ **Username terlalu pendek!**\n\nUsername minimal 3 karakter.\n\nContoh: \`cihuy\``, {
+                parse_mode: 'Markdown'
+            });
+        }
+
+        if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+            return bot.sendMessage(chatId, '❌ **Username tidak valid!**\n\nGunakan hanya huruf, angka, dan underscore (_).', {
+                parse_mode: 'Markdown'
+            });
+        }
+
+        // Auto generate data
+        const email = `${username}@cihuy.com`;
+        const firstName = username.charAt(0).toUpperCase() + username.slice(1); // Capitalize first letter
+        const lastName = 'Private';
+        const password = '1';
+
+        // Create user data
+        const userData = {
+            email: email,
+            username: username,
+            first_name: firstName,
+            last_name: lastName,
+            password: password,
+            root_admin: userState.type === 'admin'
+        };
+
+        const userTypeText = userState.type === 'admin' ? 'Admin' : 'User Biasa';
+        const userIcon = userState.type === 'admin' ? '👑' : '👤';
+
+        bot.sendMessage(chatId, `➕ *Membuat ${userTypeText} Baru*\n\n👤 **Username:** ${username}\n📧 **Email:** ${email}\n${userIcon} **Role:** ${userTypeText}\n\n⏳ Memproses...`, {
+            parse_mode: 'Markdown'
+        });
+
+        // Create user
+        const newUser = await PteroAPI.createUser(userData);
+
+        // Clear state
+        createUserState.delete(chatId);
+
+        const successText = `✅ *Berikut data panel anda:*\n\n` +
+                           `👤 **${newUser.first_name} ${newUser.last_name}**\n` +
+                           `🔑 **${newUser.username}**\n` +
+                           `🔐 **${password}**\n` +
+                           `🌐 **${PANEL_URL}**\n\n` +
+                           `${userIcon} Role: ${userTypeText}`;
+
+        bot.sendMessage(chatId, successText, {
+            parse_mode: 'Markdown',
+            ...getMainMenu()
+        });
+
+    } catch (error) {
+        console.error('Create user input error:', error);
+        createUserState.delete(chatId);
+
+        let errorMessage = '❌ Error saat membuat user: ';
+
+        if (error.response?.data?.errors) {
+            const errors = error.response.data.errors;
+            if (errors.some(err => err.detail?.includes('email'))) {
+                errorMessage += 'Email sudah digunakan.';
+            } else if (errors.some(err => err.detail?.includes('username'))) {
+                errorMessage += 'Username sudah digunakan.';
+            } else {
+                errorMessage += errors.map(err => err.detail).join(', ');
+            }
+        } else {
+            errorMessage += escapeMarkdown(error.message);
+        }
+
+        bot.sendMessage(chatId, errorMessage, getMainMenu());
+    }
+}
 
 process.on('SIGINT', () => {
     console.log('\n🛑 Bot stopped gracefully');
